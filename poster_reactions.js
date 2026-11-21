@@ -42,11 +42,11 @@
             .lampa-poster-reactions__item {
                 background: rgba(15, 15, 15, 0.88);
                 color: #fff;
-                font-size: 15px;
+                font-size: 19px;
                 font-weight: 700;
                 line-height: 1.2;
-                padding: 5px 8px;
-                border-radius: 8px;
+                padding: 7px 11px;
+                border-radius: 10px;
                 display: inline-flex;
                 align-items: center;
                 gap: 4px;
