@@ -58,13 +58,22 @@
         return 0;
     }
 
+    function getCardFireValue(card) {
+        let fire = 0;
+        const m = (card.textContent || '').match(/🔥\s*([\d.]+)\s*(K)?/i);
+        if (m) {
+            fire = parseFloat(m[1]) * (m[2] ? 1000 : 1);
+        }
+        return fire;
+    }
+
     async function sortCardsByFire() {
         if (isSorting) return;
         isSorting = true;
 
         try {
             if (window.Lampa && Lampa.Noty) {
-                Lampa.Noty.show('Підрахунок вогників та сортування...');
+                Lampa.Noty.show('Сортування за вогниками (🔥 >)...');
             }
 
             const visibleCards = Array.from(document.querySelectorAll('.card'))
@@ -74,7 +83,10 @@
 
             for (const card of visibleCards) {
                 const data = getCardData(card);
-                const fireCount = await fetchFireCount(getMethod(data), data.id);
+                let fireCount = getCardFireValue(card);
+                if (!fireCount && data && data.id) {
+                    fireCount = await fetchFireCount(getMethod(data), data.id);
+                }
                 card.dataset.fireSortCount = String(fireCount);
             }
 
@@ -90,8 +102,8 @@
                 if (cards.length < 2) return;
 
                 cards.sort((a, b) => {
-                    const fa = parseInt(a.dataset.fireSortCount || '0', 10);
-                    const fb = parseInt(b.dataset.fireSortCount || '0', 10);
+                    const fa = parseFloat(a.dataset.fireSortCount || '0');
+                    const fb = parseFloat(b.dataset.fireSortCount || '0');
                     return fb - fa;
                 });
 
@@ -99,7 +111,7 @@
             });
 
             if (window.Lampa && Lampa.Noty) {
-                Lampa.Noty.show('Готово: спочатку найбільше вогників');
+                Lampa.Noty.show('Відсортовано за вогниками (🔥 >)');
             }
         } finally {
             isSorting = false;
@@ -108,19 +120,28 @@
 
     function injectOption(rootNode) {
         const scope = rootNode && rootNode.querySelectorAll ? rootNode : document;
-        scope.querySelectorAll('.selectbox').forEach(box => {
-            const titleEl = box.querySelector('.selectbox__title');
-            const bodyEl = box.querySelector('.selectbox__body .scroll__body') || box.querySelector('.selectbox__body');
-            if (!titleEl || !bodyEl) return;
 
-            const title = (titleEl.textContent || '').trim().toLowerCase();
-            if (title !== 'рейтинг' && title !== 'rating') return;
-            if (bodyEl.querySelector('.lampa-fire-sort-btn')) return;
+        const ratingTitles = Array.from(scope.querySelectorAll('*')).filter(el =>
+            el.children.length === 0 &&
+            ['рейтинг', 'rating'].includes((el.textContent || '').trim().toLowerCase())
+        );
 
-            const template = bodyEl.querySelector('.selectbox-item');
-            const btn = document.createElement('div');
-            btn.className = (template ? template.className : 'selectbox-item selector') + ' lampa-fire-sort-btn';
-            btn.innerHTML = `<div class="selectbox-item__title">🔥 Вогники (від більшого до меншого)</div>`;
+        ratingTitles.forEach(titleEl => {
+            const root = titleEl.closest('[class*="selectbox"]') || titleEl.parentElement && titleEl.parentElement.parentElement;
+            if (!root) return;
+
+            const sampleBtn = Array.from(root.querySelectorAll('*')).find(el =>
+                el.children.length === 0 &&
+                ['будь-який', 'любой', 'any'].includes((el.textContent || '').trim().toLowerCase())
+            );
+
+            const btnParent = sampleBtn ? sampleBtn.parentElement : root;
+            if (!btnParent || btnParent.querySelector('.lampa-fire-sort-btn')) return;
+
+            const btn = sampleBtn ? sampleBtn.cloneNode(true) : document.createElement('div');
+            btn.classList.add('lampa-fire-sort-btn');
+            btn.textContent = '🔥 >';
+            btn.style.cursor = 'pointer';
 
             const onSelect = (e) => {
                 if (e) {
@@ -129,8 +150,6 @@
                 }
                 if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
                     Lampa.Select.close();
-                } else {
-                    box.remove();
                 }
                 sortCardsByFire();
             };
@@ -138,7 +157,7 @@
             btn.addEventListener('click', onSelect);
             btn.addEventListener('hover:enter', onSelect);
 
-            bodyEl.appendChild(btn);
+            btnParent.appendChild(btn);
         });
     }
 
