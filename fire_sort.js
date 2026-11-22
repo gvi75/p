@@ -25,13 +25,30 @@
         return data.name ? 'tv' : 'movie';
     }
 
-    function getFireCount(list) {
-        if (!Array.isArray(list)) return 0;
-        const fireItem = list.find(item => item && item.type === 'fire');
-        return fireItem && typeof fireItem.counter === 'number' ? fireItem.counter : 0;
+    function parseMetricValue(raw) {
+        if (typeof raw === 'number') {
+            return Number.isNaN(raw) ? 0 : raw;
+        }
+        if (!raw) return 0;
+        const m = String(raw).match(/([\d]+(?:[.,]\d+)?)\s*(K)?/i);
+        if (!m) return 0;
+        const num = parseFloat(m[1].replace(',', '.'));
+        if (Number.isNaN(num)) return 0;
+        return num * (m[2] ? 1000 : 1);
     }
 
-    async function fetchFireCount(method, id) {
+    function getPositiveScoreFromList(list) {
+        if (!Array.isArray(list)) return 0;
+        const fireItem = list.find(item => item && item.type === 'fire');
+        const niceItem = list.find(item => item && item.type === 'nice');
+
+        const fireCount = fireItem && typeof fireItem.counter === 'number' ? fireItem.counter : 0;
+        const niceCount = niceItem && typeof niceItem.counter === 'number' ? niceItem.counter : 0;
+
+        return fireCount + niceCount;
+    }
+
+    async function fetchPositiveScore(method, id) {
         const key = `${method}_${id}`;
         if (Object.prototype.hasOwnProperty.call(cache, key)) {
             return cache[key];
@@ -48,9 +65,9 @@
                 if (res.ok) {
                     const data = await res.json();
                     const list = Array.isArray(data && data.result) ? data.result : [];
-                    const count = getFireCount(list);
-                    cache[key] = count;
-                    return count;
+                    const score = getPositiveScoreFromList(list);
+                    cache[key] = score;
+                    return score;
                 }
             } catch (_) {}
         }
@@ -59,16 +76,43 @@
         return 0;
     }
 
-    function getCardFireFromDom(card) {
-        const badge = card.querySelector('.card__reaction-fire, [class*="fire"]');
-        const sourceText = badge ? badge.textContent : '';
-        const m = (sourceText || '').match(/([\d]+(?:[.,]\d+)?)\s*(K)?/i);
-        if (!m) return null;
+    function getCardScoreFromDom(card) {
+        let total = 0;
+        let foundAny = false;
 
-        const num = parseFloat(m[1].replace(',', '.'));
-        if (Number.isNaN(num)) return null;
+        const fireBadge = card.querySelector('.card__reaction-fire, [class*="fire"]');
+        if (fireBadge && fireBadge.textContent) {
+            const v = parseMetricValue(fireBadge.textContent);
+            if (v > 0 || /0/.test(fireBadge.textContent)) {
+                total += v;
+                foundAny = true;
+            }
+        }
 
-        return num * (m[2] ? 1000 : 1);
+        const niceBadge = card.querySelector('.card__reaction-nice, [class*="nice"]');
+        if (niceBadge && niceBadge.textContent) {
+            const v = parseMetricValue(niceBadge.textContent);
+            if (v > 0 || /0/.test(niceBadge.textContent)) {
+                total += v;
+                foundAny = true;
+            }
+        }
+
+        if (!foundAny) {
+            const text = card.textContent || '';
+            const fireMatch = text.match(/🔥\s*([\d]+(?:[.,]\d+)?\s*K?)/i);
+            const niceMatch = text.match(/👍\s*([\d]+(?:[.,]\d+)?\s*K?)/i);
+            if (fireMatch) {
+                total += parseMetricValue(fireMatch[1]);
+                foundAny = true;
+            }
+            if (niceMatch) {
+                total += parseMetricValue(niceMatch[1]);
+                foundAny = true;
+            }
+        }
+
+        return foundAny ? total : null;
     }
 
     async function runWithConcurrency(items, limit, worker) {
@@ -88,7 +132,7 @@
 
         try {
             if (window.Lampa && Lampa.Noty) {
-                Lampa.Noty.show('Сортування за вогниками (🔥 >)...');
+                Lampa.Noty.show('Сортування за 🔥 + 👍 >...');
             }
 
             const visibleCards = Array.from(document.querySelectorAll('.card'))
@@ -100,21 +144,21 @@
                 const data = getCardData(card);
                 const key = data && data.id ? `${getMethod(data)}_${data.id}` : null;
 
-                let fireCount = null;
+                let score = null;
                 if (key && Object.prototype.hasOwnProperty.call(cache, key)) {
-                    fireCount = cache[key];
+                    score = cache[key];
                 } else {
-                    fireCount = getCardFireFromDom(card);
+                    score = getCardScoreFromDom(card);
                 }
 
-                if ((fireCount === null || fireCount === 0) && data && data.id) {
-                    const apiCount = await fetchFireCount(getMethod(data), data.id);
-                    if (fireCount === null || apiCount > 0) {
-                        fireCount = apiCount;
+                if ((score === null || score === 0) && data && data.id) {
+                    const apiScore = await fetchPositiveScore(getMethod(data), data.id);
+                    if (score === null || apiScore > 0) {
+                        score = apiScore;
                     }
                 }
 
-                const normalized = typeof fireCount === 'number' && !Number.isNaN(fireCount) ? fireCount : 0;
+                const normalized = typeof score === 'number' && !Number.isNaN(score) ? score : 0;
                 card.dataset.fireSortCount = String(normalized);
             });
 
@@ -140,7 +184,7 @@
             });
 
             if (window.Lampa && Lampa.Noty) {
-                Lampa.Noty.show('Відсортовано за вогниками (🔥 >)');
+                Lampa.Noty.show('Відсортовано за 🔥 + 👍 >');
             }
         } finally {
             isSorting = false;
@@ -182,7 +226,7 @@
             opt.classList.add('lampa-fire-sort-option');
 
             const titleTarget = opt.querySelector('[class*="title"], span, div') || opt;
-            titleTarget.textContent = '🔥 >';
+            titleTarget.textContent = '🔥 + 👍 >';
             opt.style.cursor = 'pointer';
 
             const onPick = (e) => {
