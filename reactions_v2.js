@@ -38,6 +38,32 @@
         return null;
     }
 
+    function getCardYear(card, data) {
+        const raw =
+            (data && (data.release_date || data.first_air_date || data.year || data.release_year)) ||
+            '';
+        const match = String(raw).match(/\b(19\d\d|20\d\d)\b/);
+        if (match) return Number(match[1]);
+
+        if (card) {
+            const yearEl = card.querySelector('.card__year, .card__age, [class*="year"]');
+            if (yearEl) {
+                const domMatch = String(yearEl.textContent || '').match(/\b(19\d\d|20\d\d)\b/);
+                if (domMatch) return Number(domMatch[1]);
+            }
+        }
+        return null;
+    }
+
+    function parseDecadeBounds(label) {
+        const match = String(label || '').match(/(\d{4})\s*[-–]\s*(\d{4})/);
+        if (!match) return null;
+        return {
+            start: Number(match[1]),
+            end: Number(match[2])
+        };
+    }
+
     function getMethod(data) {
         if (data.media_type === 'tv' || data.media_type === 'movie') {
             return data.media_type;
@@ -132,25 +158,32 @@
         return false;
     }
 
-    function applyWatchedFilter() {
+    function applyCardVisibilityFilters() {
         const cards = Array.from(document.querySelectorAll('.card'));
         if (!cards.length) return;
 
         const watchedIds = hideWatched ? collectWatchedIds() : null;
+        const decadeBounds = selectedDecade ? parseDecadeBounds(selectedDecade) : null;
 
         for (let i = 0; i < cards.length; i++) {
             const card = cards[i];
-            if (!getCardData(card)) continue;
+            const data = getCardData(card);
+            if (!data) continue;
 
-            if (!hideWatched) {
-                if (card.dataset.hiddenByPlugin === '1') {
-                    card.style.display = '';
-                    delete card.dataset.hiddenByPlugin;
-                }
-                continue;
+            let shouldHide = false;
+
+            if (hideWatched && isCardWatched(card, watchedIds)) {
+                shouldHide = true;
             }
 
-            if (isCardWatched(card, watchedIds)) {
+            if (!shouldHide && decadeBounds) {
+                const yr = getCardYear(card, data);
+                if (yr !== null && (yr < decadeBounds.start || yr > decadeBounds.end)) {
+                    shouldHide = true;
+                }
+            }
+
+            if (shouldHide) {
                 card.style.display = 'none';
                 card.dataset.hiddenByPlugin = '1';
             } else if (card.dataset.hiddenByPlugin === '1') {
@@ -281,7 +314,8 @@
     }
 
     async function sortCardsByLikes(options) {
-        const silentWhenEmpty = Boolean(options && options.silentWhenEmpty);
+        const opts = options || {};
+        const silent = Boolean(opts.silent);
         if (isSorting) return;
         isSorting = true;
 
@@ -294,13 +328,13 @@
                 });
 
             if (!visibleCards.length) {
-                if (!silentWhenEmpty && window.Lampa && Lampa.Noty) {
+                if (!silent && window.Lampa && Lampa.Noty) {
                     Lampa.Noty.show('Сортування за 👍 > увімкнено. Натисніть «Розпочати пошук» або дочекайтесь карток.');
                 }
                 return;
             }
 
-            if (window.Lampa && Lampa.Noty) {
+            if (!silent && window.Lampa && Lampa.Noty) {
                 Lampa.Noty.show('Сортування за лайками (👍 >)...');
             }
 
@@ -328,9 +362,9 @@
                 cards.forEach(function (card) { parent.appendChild(card); });
             });
 
-            applyWatchedFilter();
+            applyCardVisibilityFilters();
 
-            if (window.Lampa && Lampa.Noty) {
+            if (!silent && window.Lampa && Lampa.Noty) {
                 Lampa.Noty.show('Відсортовано за лайками (👍 >)');
             }
         } finally {
@@ -338,10 +372,12 @@
         }
     }
 
-    function schedulePosterEnrich() {
+    function schedulePosterEnrich(options) {
+        const opts = options || {};
+        const allowNotify = Boolean(opts.allowNotify);
         clearTimeout(autoSortTimer);
         autoSortTimer = setTimeout(function () {
-            applyWatchedFilter();
+            applyCardVisibilityFilters();
 
             const visibleCards = Array.from(document.querySelectorAll('.card'))
                 .filter(function (el) {
@@ -354,7 +390,7 @@
             if (!visibleCards.length) return;
 
             if (wantLikeSort) {
-                sortCardsByLikes({ silentWhenEmpty: true });
+                sortCardsByLikes({ silent: !allowNotify });
             } else {
                 populatePosterReactions(visibleCards);
             }
@@ -386,29 +422,28 @@
         return yearLikeCount >= 3;
     }
 
-    function parseDecadeBounds(label) {
-        const match = String(label || '').match(/(\d{4})\s*[-–]\s*(\d{4})/);
-        if (!match) return null;
-        return {
-            start: Number(match[1]),
-            end: Number(match[2])
-        };
-    }
-
     function applyYearLabelInFilterUi(label) {
         if (!label) return;
-        const rows = Array.from(document.querySelectorAll('.selectbox-item, .selector-item, .filter-item, .list-item, [class*="filter"] *'));
+        const rows = Array.from(document.querySelectorAll('.selectbox-item, .selector-item, .filter-item, .list-item'));
         for (let i = 0; i < rows.length; i++) {
-            const el = rows[i];
-            if (!(el instanceof HTMLElement)) continue;
-            const txt = (el.textContent || '').trim().toLowerCase();
-            if (txt === 'рік' || txt === 'год' || txt === 'year') {
-                const container = el.closest('.selectbox-item, .selector-item, .filter-item, .list-item') || el.parentElement;
-                if (container) {
-                    const sub = container.querySelector('.selectbox-item__subtitle, .selector-item__subtitle, .filter-item__value, small, span:last-child');
-                    if (sub && sub !== el) {
-                        sub.textContent = label;
+            const row = rows[i];
+            if (!(row instanceof HTMLElement)) continue;
+            const titleEl = row.querySelector('.selectbox-item__title, .selector-item__title, .filter-item__title, .title');
+            const titleText = String((titleEl ? titleEl.textContent : row.textContent) || '').trim().toLowerCase();
+            if (titleText === 'рік' || titleText === 'год' || titleText === 'year') {
+                const subEl = row.querySelector('.selectbox-item__subtitle, .selector-item__subtitle, .filter-item__value, .subtitle, small');
+                if (subEl && subEl !== titleEl) {
+                    subEl.textContent = label;
+                } else {
+                    let valueNode = row.querySelector('.lampa-selected-decade-label');
+                    if (!valueNode) {
+                        valueNode = document.createElement('span');
+                        valueNode.className = 'lampa-selected-decade-label';
+                        valueNode.style.marginLeft = '8px';
+                        valueNode.style.opacity = '0.85';
+                        row.appendChild(valueNode);
                     }
+                    valueNode.textContent = label;
                 }
             }
         }
@@ -449,6 +484,8 @@
                 origOnSelect(item);
             }
         }
+
+        applyCardVisibilityFilters();
 
         if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
             Lampa.Select.close();
@@ -550,7 +587,7 @@
 
     function toggleHideWatched() {
         hideWatched = !hideWatched;
-        applyWatchedFilter();
+        applyCardVisibilityFilters();
 
         if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
             Lampa.Select.close();
@@ -579,7 +616,7 @@
         }
 
         setTimeout(function () {
-            sortCardsByLikes({ silentWhenEmpty: false });
+            sortCardsByLikes({ silent: false });
         }, 80);
     }
 
@@ -706,7 +743,7 @@
                 txt.indexOf('start search') !== -1 ||
                 target.closest('[class*="search"], [class*="submit"], [class*="apply"]')
             ) {
-                setTimeout(function () { schedulePosterEnrich(); }, 400);
+                setTimeout(function () { schedulePosterEnrich({ allowNotify: false }); }, 400);
             }
         };
 
@@ -725,7 +762,7 @@
         } catch (_) {}
 
         bindSearchTriggers();
-        schedulePosterEnrich();
+        schedulePosterEnrich({ allowNotify: false });
 
         if (!patchLampaSelect()) {
             let attempts = 0;
@@ -744,7 +781,7 @@
                 timer = setTimeout(function () {
                     timer = null;
                     patchLampaSelect();
-                    applyWatchedFilter();
+                    applyCardVisibilityFilters();
                     if (selectedDecade) {
                         applyYearLabelInFilterUi(selectedDecade);
                     }
@@ -756,7 +793,7 @@
                         });
                     });
                     if (hasNewCards) {
-                        schedulePosterEnrich();
+                        schedulePosterEnrich({ allowNotify: false });
                     }
                 }, 80);
             });
