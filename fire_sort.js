@@ -204,7 +204,16 @@
             opt.addEventListener('click', onPick, true);
             opt.addEventListener('hover:enter', onPick, true);
 
-            scrollBody.appendChild(opt);
+            const anyItem = items.find(item => {
+                const txt = (item.textContent || '').trim().toLowerCase();
+                return txt === 'будь-який' || txt === 'любой' || txt === 'any';
+            });
+
+            if (anyItem) {
+                anyItem.insertAdjacentElement('afterend', opt);
+            } else {
+                scrollBody.appendChild(opt);
+            }
         }
     }
 
