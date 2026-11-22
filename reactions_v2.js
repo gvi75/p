@@ -8,6 +8,7 @@
     let isSorting = false;
     let wantLikeSort = false;
     let hideWatched = false;
+    let selectedDecade = null;
     let autoSortTimer = null;
 
     const POSITIVE_TYPES = ['fire', 'nice', 'think'];
@@ -385,6 +386,90 @@
         return yearLikeCount >= 3;
     }
 
+    function parseDecadeBounds(label) {
+        const match = String(label || '').match(/(\d{4})\s*[-–]\s*(\d{4})/);
+        if (!match) return null;
+        return {
+            start: Number(match[1]),
+            end: Number(match[2])
+        };
+    }
+
+    function applyYearLabelInFilterUi(label) {
+        if (!label) return;
+        const rows = Array.from(document.querySelectorAll('.selectbox-item, .selector-item, .filter-item, .list-item, [class*="filter"] *'));
+        for (let i = 0; i < rows.length; i++) {
+            const el = rows[i];
+            if (!(el instanceof HTMLElement)) continue;
+            const txt = (el.textContent || '').trim().toLowerCase();
+            if (txt === 'рік' || txt === 'год' || txt === 'year') {
+                const container = el.closest('.selectbox-item, .selector-item, .filter-item, .list-item') || el.parentElement;
+                if (container) {
+                    const sub = container.querySelector('.selectbox-item__subtitle, .selector-item__subtitle, .filter-item__value, small, span:last-child');
+                    if (sub && sub !== el) {
+                        sub.textContent = label;
+                    }
+                }
+            }
+        }
+    }
+
+    function handleCustomDecadeSelect(item, origItems, origOnSelect, origOnBack) {
+        const rangeLabel = String((item && (item.title || item.name)) || '').trim();
+        selectedDecade = rangeLabel || null;
+
+        try {
+            if (window.Lampa && Lampa.Storage && typeof Lampa.Storage.set === 'function') {
+                Lampa.Storage.set('lampa_custom_decade_range', selectedDecade);
+            }
+        } catch (_) {}
+
+        const bounds = parseDecadeBounds(rangeLabel);
+        let matchedOrig = null;
+
+        if (Array.isArray(origItems) && bounds) {
+            matchedOrig = origItems.find(function (orig) {
+                if (!orig || typeof orig !== 'object' || orig.__isCustomDecadeOption) return false;
+                const cand = String(orig.value || orig.year || orig.title || orig.name || '');
+                const numMatch = cand.match(/\b(19\d\d|20\d\d)\b/);
+                if (!numMatch) return false;
+                const yr = Number(numMatch[1]);
+                return yr >= bounds.start && yr <= bounds.end;
+            }) || null;
+        }
+
+        if (typeof origOnSelect === 'function') {
+            if (matchedOrig) {
+                const patchedOrig = Object.assign({}, matchedOrig, {
+                    title: rangeLabel,
+                    name: rangeLabel
+                });
+                origOnSelect(patchedOrig);
+            } else {
+                origOnSelect(item);
+            }
+        }
+
+        if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
+            Lampa.Select.close();
+        } else {
+            const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
+            if (closeBtn) closeBtn.click();
+        }
+
+        setTimeout(function () {
+            applyYearLabelInFilterUi(rangeLabel);
+        }, 60);
+
+        if (typeof origOnBack === 'function') {
+            origOnBack();
+        }
+
+        if (window.Lampa && Lampa.Noty) {
+            Lampa.Noty.show('Обрано період: ' + rangeLabel);
+        }
+    }
+
     function buildDecadeItems(origItems) {
         const sample = Array.isArray(origItems) ? origItems.find(function (it) {
             return it && typeof it === 'object';
@@ -508,17 +593,19 @@
 
         Lampa.Select.show = function (params) {
             if (params && Array.isArray(params.items)) {
-                let nextItems = params.items.slice();
+                const rawItems = params.items.slice();
+                let nextItems = rawItems.slice();
                 let modified = false;
+                const isYearMenu = isYearSelectParams(params);
                 const origOnSelect = params.onSelect;
                 const origOnBack = params.onBack;
 
-                if (isYearSelectParams(params)) {
+                if (isYearMenu) {
                     const alreadyDecades = nextItems.some(function (it) {
                         return it && it.__isCustomDecadeOption;
                     });
                     if (!alreadyDecades) {
-                        nextItems = buildDecadeItems(nextItems);
+                        nextItems = buildDecadeItems(rawItems);
                         modified = true;
                     }
                 } else if (isRatingSelectParams(params)) {
@@ -564,6 +651,10 @@
                     params = Object.assign({}, params, {
                         items: nextItems,
                         onSelect: function (item) {
+                            if (isYearMenu && item && item.__isCustomDecadeOption) {
+                                handleCustomDecadeSelect(item, rawItems, origOnSelect, origOnBack);
+                                return;
+                            }
                             if (item && item.__isLikeSortOption) {
                                 triggerLikeSortSelection();
                                 if (typeof origOnBack === 'function') {
@@ -586,7 +677,15 @@
                 }
             }
 
-            return origShow(params);
+            const result = origShow(params);
+
+            if (selectedDecade && isFilterLikeSelectParams(params)) {
+                setTimeout(function () {
+                    applyYearLabelInFilterUi(selectedDecade);
+                }, 50);
+            }
+
+            return result;
         };
 
         Lampa.Select.__likeSortPatched = true;
@@ -616,6 +715,15 @@
     }
 
     function init() {
+        try {
+            if (window.Lampa && Lampa.Storage && typeof Lampa.Storage.get === 'function') {
+                const saved = Lampa.Storage.get('lampa_custom_decade_range');
+                if (typeof saved === 'string' && saved.trim()) {
+                    selectedDecade = saved.trim();
+                }
+            }
+        } catch (_) {}
+
         bindSearchTriggers();
         schedulePosterEnrich();
 
@@ -637,6 +745,9 @@
                     timer = null;
                     patchLampaSelect();
                     applyWatchedFilter();
+                    if (selectedDecade) {
+                        applyYearLabelInFilterUi(selectedDecade);
+                    }
 
                     const hasNewCards = mutations.some(function (m) {
                         return Array.from(m.addedNodes).some(function (n) {
