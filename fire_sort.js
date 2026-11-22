@@ -37,6 +37,15 @@
         return num * (m[2] ? 1000 : 1);
     }
 
+    function formatScore(val) {
+        const num = Number(val) || 0;
+        if (num >= 1000) {
+            const k = (num / 1000).toFixed(1).replace(/\.0$/, '');
+            return `${k}K`;
+        }
+        return String(Math.round(num * 10) / 10);
+    }
+
     function getPositiveScoreFromList(list) {
         if (!Array.isArray(list)) return 0;
         const fireItem = list.find(item => item && item.type === 'fire');
@@ -115,6 +124,39 @@
         return foundAny ? total : null;
     }
 
+    function renderScoreBadge(card, score) {
+        const targetContainer =
+            card.querySelector('.card__view, .card__box, .card__img-box') || card;
+
+        let badge = card.querySelector('.lampa-fire-sum-badge');
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.className = 'lampa-fire-sum-badge';
+            badge.style.position = 'absolute';
+            badge.style.top = '8px';
+            badge.style.left = '8px';
+            badge.style.zIndex = '15';
+            badge.style.padding = '2px 7px';
+            badge.style.borderRadius = '6px';
+            badge.style.background = 'rgba(0, 0, 0, 0.78)';
+            badge.style.color = '#fff';
+            badge.style.fontSize = '12px';
+            badge.style.fontWeight = '700';
+            badge.style.lineHeight = '1.3';
+            badge.style.pointerEvents = 'none';
+            badge.style.backdropFilter = 'blur(3px)';
+
+            const computedPos = window.getComputedStyle(targetContainer).position;
+            if (!computedPos || computedPos === 'static') {
+                targetContainer.style.position = 'relative';
+            }
+
+            targetContainer.appendChild(badge);
+        }
+
+        badge.textContent = `⭐ ${formatScore(score)}`;
+    }
+
     async function runWithConcurrency(items, limit, worker) {
         const queue = items.slice();
         const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
@@ -160,6 +202,7 @@
 
                 const normalized = typeof score === 'number' && !Number.isNaN(score) ? score : 0;
                 card.dataset.fireSortCount = String(normalized);
+                renderScoreBadge(card, normalized);
             });
 
             const groups = new Map();
@@ -207,7 +250,6 @@
 
         const texts = items.map(item => (item.textContent || '').trim().toLowerCase()).filter(Boolean);
 
-        // Відсікаємо списки з роками (наприклад, 2026, 2025, 2027-2022)
         const yearLikeCount = texts.filter(t => /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t)).length;
         if (yearLikeCount >= 2) return false;
 
