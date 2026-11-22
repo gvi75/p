@@ -38,6 +38,41 @@
         return null;
     }
 
+    function getCardYear(card, data) {
+        const candidates = [
+            data && data.release_date,
+            data && data.first_air_date,
+            data && data.year,
+            data && data.release_year
+        ];
+
+        for (let i = 0; i < candidates.length; i++) {
+            const val = candidates[i];
+            if (val === undefined || val === null) continue;
+            const match = String(val).match(/\b(19\d\d|20\d\d)\b/);
+            if (match) return Number(match[1]);
+        }
+
+        if (card) {
+            const yearEl = card.querySelector('.card__year, .card__age, [class*="year"]');
+            if (yearEl) {
+                const domMatch = String(yearEl.textContent || '').match(/\b(19\d\d|20\d\d)\b/);
+                if (domMatch) return Number(domMatch[1]);
+            }
+        }
+
+        return null;
+    }
+
+    function parseDecadeBounds(label) {
+        const match = String(label || '').match(/(\d{4})\s*[-–]\s*(\d{4})/);
+        if (!match) return null;
+        return {
+            start: Number(match[1]),
+            end: Number(match[2])
+        };
+    }
+
     function getMethod(data) {
         if (data.media_type === 'tv' || data.media_type === 'movie') {
             return data.media_type;
@@ -132,30 +167,48 @@
         return false;
     }
 
-    function applyWatchedFilter() {
+    function isCardHiddenByPlugin(card) {
+        return card.dataset.hiddenWatched === '1' || card.dataset.hiddenDecade === '1';
+    }
+
+    function applyCardFilters() {
         const cards = Array.from(document.querySelectorAll('.card'));
         if (!cards.length) return;
 
         const watchedIds = hideWatched ? collectWatchedIds() : null;
+        const decadeBounds = selectedDecade ? parseDecadeBounds(selectedDecade) : null;
 
         for (let i = 0; i < cards.length; i++) {
             const card = cards[i];
-            if (!getCardData(card)) continue;
+            const data = getCardData(card);
+            if (!data) continue;
 
-            if (!hideWatched) {
-                if (card.dataset.hiddenByPlugin === '1') {
-                    card.style.display = '';
-                    delete card.dataset.hiddenByPlugin;
+            const shouldHideWatched = Boolean(hideWatched && isCardWatched(card, watchedIds));
+            let shouldHideDecade = false;
+
+            if (decadeBounds) {
+                const yr = getCardYear(card, data);
+                if (yr !== null && (yr < decadeBounds.start || yr > decadeBounds.end)) {
+                    shouldHideDecade = true;
                 }
-                continue;
             }
 
-            if (isCardWatched(card, watchedIds)) {
+            if (shouldHideWatched) {
+                card.dataset.hiddenWatched = '1';
+            } else {
+                delete card.dataset.hiddenWatched;
+            }
+
+            if (shouldHideDecade) {
+                card.dataset.hiddenDecade = '1';
+            } else {
+                delete card.dataset.hiddenDecade;
+            }
+
+            if (shouldHideWatched || shouldHideDecade) {
                 card.style.display = 'none';
-                card.dataset.hiddenByPlugin = '1';
-            } else if (card.dataset.hiddenByPlugin === '1') {
+            } else if (card.style.display === 'none') {
                 card.style.display = '';
-                delete card.dataset.hiddenByPlugin;
             }
         }
     }
@@ -291,7 +344,7 @@
                 .filter(function (el) {
                     return el.offsetParent !== null &&
                         getCardData(el) !== null &&
-                        el.dataset.hiddenByPlugin !== '1';
+                        !isCardHiddenByPlugin(el);
                 });
 
             if (!visibleCards.length) {
@@ -329,7 +382,7 @@
                 cards.forEach(function (card) { parent.appendChild(card); });
             });
 
-            applyWatchedFilter();
+            applyCardFilters();
 
             if (!silent && window.Lampa && Lampa.Noty) {
                 Lampa.Noty.show('Відсортовано за лайками (👍 >)');
@@ -344,13 +397,13 @@
         const allowNotify = Boolean(opts.allowNotify);
         clearTimeout(autoSortTimer);
         autoSortTimer = setTimeout(function () {
-            applyWatchedFilter();
+            applyCardFilters();
 
             const visibleCards = Array.from(document.querySelectorAll('.card'))
                 .filter(function (el) {
                     return el.offsetParent !== null &&
                         getCardData(el) !== null &&
-                        el.dataset.hiddenByPlugin !== '1' &&
+                        !isCardHiddenByPlugin(el) &&
                         !el.querySelector('.lampa-like-dislike-wrap');
                 });
 
@@ -389,12 +442,58 @@
         return yearLikeCount >= 3;
     }
 
+    function applyYearLabelInFilterUi(label) {
+        const rows = Array.from(document.querySelectorAll('.selectbox-item, .selector-item, .filter-item, .list-item'));
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            if (!(row instanceof HTMLElement)) continue;
+            const titleEl = row.querySelector('.selectbox-item__title, .selector-item__title, .filter-item__title, .title');
+            const titleText = String((titleEl ? titleEl.textContent : row.textContent) || '').trim().toLowerCase();
+            if (titleText === 'рік' || titleText === 'год' || titleText === 'year') {
+                let valueNode = row.querySelector('.lampa-selected-decade-label');
+                if (!label) {
+                    if (valueNode) valueNode.remove();
+                    continue;
+                }
+                if (!valueNode) {
+                    valueNode = document.createElement('span');
+                    valueNode.className = 'lampa-selected-decade-label';
+                    valueNode.style.marginLeft = '8px';
+                    valueNode.style.opacity = '0.85';
+                    row.appendChild(valueNode);
+                }
+                valueNode.textContent = label;
+            }
+        }
+    }
+
+    function setSelectedDecadeValue(decadeLabel) {
+        selectedDecade = decadeLabel || null;
+        try {
+            if (window.Lampa && Lampa.Storage && typeof Lampa.Storage.set === 'function') {
+                Lampa.Storage.set('lampa_custom_decade_range', selectedDecade);
+            }
+        } catch (_) {}
+
+        applyCardFilters();
+        setTimeout(function () {
+            applyYearLabelInFilterUi(selectedDecade);
+        }, 60);
+    }
+
     function buildDecadeItems(origItems) {
         const sample = Array.isArray(origItems) ? origItems.find(function (it) {
             return it && typeof it === 'object';
         }) : null;
 
-        return CUSTOM_DECADE_RANGES.map(function (rangeLabel) {
+        const resetItem = {
+            title: 'Будь-який',
+            name: 'Будь-який',
+            value: '',
+            __isResetDecadeOption: true
+        };
+
+        const decadeItems = CUSTOM_DECADE_RANGES.map(function (rangeLabel) {
             const compactValue = rangeLabel.replace(/\s+/g, '');
             const base = sample ? Object.assign({}, sample) : {};
             delete base.selected;
@@ -408,6 +507,8 @@
             base.__isCustomDecadeOption = true;
             return base;
         });
+
+        return [resetItem].concat(decadeItems);
     }
 
     function isRatingSelectParams(params) {
@@ -479,7 +580,7 @@
 
     function toggleHideWatched() {
         hideWatched = !hideWatched;
-        applyWatchedFilter();
+        applyCardFilters();
 
         if (window.Lampa && Lampa.Noty) {
             Lampa.Noty.show(
@@ -515,7 +616,7 @@
 
                 if (isYearMenu) {
                     const alreadyDecades = nextItems.some(function (it) {
-                        return it && it.__isCustomDecadeOption;
+                        return it && (it.__isCustomDecadeOption || it.__isResetDecadeOption);
                     });
                     if (!alreadyDecades) {
                         nextItems = buildDecadeItems(rawItems);
@@ -566,15 +667,21 @@
                     params = Object.assign({}, params, {
                         items: nextItems,
                         onSelect: function (item) {
+                            if (isYearMenu && item && item.__isResetDecadeOption) {
+                                setSelectedDecadeValue(null);
+                                if (window.Lampa && Lampa.Noty) {
+                                    Lampa.Noty.show('Фільтр десятиліття скинуто');
+                                }
+                                if (typeof origOnSelect === 'function') {
+                                    return origOnSelect.apply(this, arguments);
+                                }
+                                return;
+                            }
                             if (isYearMenu && item && item.__isCustomDecadeOption) {
-                                selectedDecade = String((item.title || item.name) || '').trim() || null;
-                                try {
-                                    if (window.Lampa && Lampa.Storage && typeof Lampa.Storage.set === 'function') {
-                                        Lampa.Storage.set('lampa_custom_decade_range', selectedDecade);
-                                    }
-                                } catch (_) {}
-                                if (window.Lampa && Lampa.Noty && selectedDecade) {
-                                    Lampa.Noty.show('Обрано період: ' + selectedDecade);
+                                const label = String((item.title || item.name) || '').trim() || null;
+                                setSelectedDecadeValue(label);
+                                if (window.Lampa && Lampa.Noty && label) {
+                                    Lampa.Noty.show('Обрано період: ' + label);
                                 }
                                 if (typeof origOnSelect === 'function') {
                                     return origOnSelect.apply(this, arguments);
@@ -597,7 +704,15 @@
                 }
             }
 
-            return origShow(params);
+            const result = origShow(params);
+
+            if (selectedDecade && isFilterLikeSelectParams(params)) {
+                setTimeout(function () {
+                    applyYearLabelInFilterUi(selectedDecade);
+                }, 50);
+            }
+
+            return result;
         };
 
         Lampa.Select.__likeSortPatched = true;
@@ -658,7 +773,10 @@
                 timer = setTimeout(function () {
                     timer = null;
                     patchLampaSelect();
-                    applyWatchedFilter();
+                    applyCardFilters();
+                    if (selectedDecade) {
+                        applyYearLabelInFilterUi(selectedDecade);
+                    }
 
                     const hasNewCards = mutations.some(function (m) {
                         return Array.from(m.addedNodes).some(function (n) {
