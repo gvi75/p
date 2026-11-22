@@ -32,7 +32,7 @@
         if (el.card_data && el.card_data.id) return el.card_data;
         if (window.$) {
             const $el = window.$(el);
-            const d = $el.data('card') || $el.data('item') \vert{}\vert{}$el.data('data');
+            const d = $el.data('card') || $el.data('item') || $el.data('data');
             if (d && d.id) return d;
         }
         return null;
@@ -803,4 +803,43 @@
 
         if (!patchLampaSelect()) {
             let attempts = 0;
-            const waitTimer = setInterval(function ()
+            const waitTimer = setInterval(function () {
+                attempts++;
+                if (patchLampaSelect() || attempts > 50) {
+                    clearInterval(waitTimer);
+                }
+            }, 100);
+        }
+
+        if (!window.__lampaLikeSortObserver) {
+            let timer = null;
+            window.__lampaLikeSortObserver = new MutationObserver(function (mutations) {
+                if (timer) return;
+                timer = setTimeout(function () {
+                    timer = null;
+                    patchLampaSelect();
+                    applyCardVisibilityFilters();
+                    if (selectedDecade) {
+                        applyYearLabelInFilterUi(selectedDecade);
+                    }
+
+                    const hasNewCards = mutations.some(function (m) {
+                        return Array.from(m.addedNodes).some(function (n) {
+                            return n instanceof HTMLElement &&
+                                (n.matches('.card') || (n.querySelector && n.querySelector('.card')));
+                        });
+                    });
+                    if (hasNewCards) {
+                        schedulePosterEnrich({ allowNotify: false });
+                    }
+                }, 80);
+            });
+            window.__lampaLikeSortObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+    }
+
+    init();
+})();
