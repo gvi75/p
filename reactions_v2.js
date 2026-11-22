@@ -339,8 +339,6 @@
 
     function schedulePosterEnrich() {
         clearTimeout(autoSortTimer);
-        function schedulePosterEnrich() {
-        clearTimeout(autoSortTimer);
         autoSortTimer = setTimeout(function () {
             applyWatchedFilter();
 
