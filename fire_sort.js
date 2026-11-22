@@ -12,7 +12,7 @@
         if (el.card_data && el.card_data.id) return el.card_data;
         if (window.$) {
             const $el = window.$(el);
-            const d = $el.data('card') || $el.data('item') || $el.data('data');
+            const d = $el.data('card') || $el.data('item') \vert{}\vert{}$el.data('data');
             if (d && d.id) return d;
         }
         return null;
@@ -136,15 +136,31 @@
             badge.style.top = '8px';
             badge.style.left = '8px';
             badge.style.zIndex = '15';
+            badge.style.display = 'inline-flex';
+            badge.style.alignItems = 'center';
+            badge.style.gap = '4px';
             badge.style.padding = '2px 7px';
             badge.style.borderRadius = '6px';
             badge.style.background = 'rgba(0, 0, 0, 0.78)';
             badge.style.color = '#fff';
             badge.style.fontSize = '12px';
             badge.style.fontWeight = '700';
-            badge.style.lineHeight = '1.3';
+            badge.style.lineHeight = '1.2';
             badge.style.pointerEvents = 'none';
             badge.style.backdropFilter = 'blur(3px)';
+
+            const iconEl = document.createElement('span');
+            iconEl.className = 'lampa-fire-sum-icon';
+            iconEl.textContent = '⭐';
+            iconEl.style.fontSize = '16px';
+            iconEl.style.lineHeight = '1';
+            iconEl.style.display = 'inline-block';
+
+            const valEl = document.createElement('span');
+            valEl.className = 'lampa-fire-sum-val';
+
+            badge.appendChild(iconEl);
+            badge.appendChild(valEl);
 
             const computedPos = window.getComputedStyle(targetContainer).position;
             if (!computedPos || computedPos === 'static') {
@@ -154,7 +170,10 @@
             targetContainer.appendChild(badge);
         }
 
-        badge.textContent = `⭐ ${formatScore(score)}`;
+        const valEl = badge.querySelector('.lampa-fire-sum-val');
+        if (valEl) {
+            valEl.textContent = formatScore(score);
+        }
     }
 
     async function runWithConcurrency(items, limit, worker) {
@@ -250,101 +269,4 @@
 
         const texts = items.map(item => (item.textContent || '').trim().toLowerCase()).filter(Boolean);
 
-        const yearLikeCount = texts.filter(t => /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t)).length;
-        if (yearLikeCount >= 2) return false;
-
-        const hasRatingRange = texts.some(t =>
-            /^(від|от|from)\s+\d+/.test(t) ||
-            /^(від|от|from)\s+\d+\s+(до|по|to)\s+\d+/.test(t)
-        );
-
-        return Boolean(hasRatingHeader || hasRatingRange);
-    }
-
-    function injectIntoOpenSelectbox(rootNode) {
-        const scope = rootNode && rootNode.querySelectorAll ? rootNode : document;
-
-        const scrollBodies = Array.from(scope.querySelectorAll('.scroll__body')).filter(el => {
-            if (!(el instanceof HTMLElement)) return false;
-            const rect = el.getBoundingClientRect();
-            return rect.width > 0 && rect.height > 0;
-        });
-
-        for (const scrollBody of scrollBodies) {
-            const existingOpt = scrollBody.querySelector('.lampa-fire-sort-option');
-            const validRating = isRatingScrollBody(scrollBody);
-
-            if (!validRating) {
-                if (existingOpt) existingOpt.remove();
-                continue;
-            }
-
-            if (existingOpt) continue;
-
-            const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(
-                item => !item.classList.contains('lampa-fire-sort-option')
-            );
-            if (!items.length) continue;
-
-            const sample = items[items.length - 1];
-            const opt = sample.cloneNode(true);
-            opt.classList.remove('active', 'focus', 'selected');
-            opt.classList.add('lampa-fire-sort-option');
-
-            const titleTarget = opt.querySelector('[class*="title"], span, div') || opt;
-            titleTarget.textContent = '🔥 + 👍 >';
-            opt.style.cursor = 'pointer';
-
-            const onPick = (e) => {
-                if (e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-                if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
-                    Lampa.Select.close();
-                } else {
-                    const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
-                    if (closeBtn) closeBtn.click();
-                }
-                setTimeout(() => {
-                    sortCardsByFire();
-                }, 60);
-            };
-
-            opt.addEventListener('click', onPick, true);
-            opt.addEventListener('hover:enter', onPick, true);
-
-            const anyItem = items.find(item => {
-                const txt = (item.textContent || '').trim().toLowerCase();
-                return txt === 'будь-який' || txt === 'любой' || txt === 'any';
-            });
-
-            if (anyItem) {
-                anyItem.insertAdjacentElement('afterend', opt);
-            } else {
-                scrollBody.appendChild(opt);
-            }
-        }
-    }
-
-    function init() {
-        injectIntoOpenSelectbox(document);
-
-        if (!window.__lampaFireSortObserver) {
-            let timer = null;
-            window.__lampaFireSortObserver = new MutationObserver(() => {
-                if (timer) return;
-                timer = setTimeout(() => {
-                    timer = null;
-                    injectIntoOpenSelectbox(document);
-                }, 40);
-            });
-            window.__lampaFireSortObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-        }
-    }
-
-    init();
-})();
+        const yearLikeCount = texts.filter(t => /^\d{4}(\s*[-–]\s*\d{
