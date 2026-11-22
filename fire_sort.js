@@ -271,110 +271,108 @@
         }, 350);
     }
 
-    function isRatingScrollBody(scrollBody) {
-        const box = scrollBody.closest('.selectbox, .select, [class*="selectbox"], [class*="select"]') || scrollBody.parentElement;
-        const boxText = (box && box.textContent ? box.textContent : '').toLowerCase();
+    function isRatingSelectParams(params) {
+        if (!params || !Array.isArray(params.items) || !params.items.length) return false;
 
-        const hasRatingHeader =
-            boxText.indexOf('рейтинг') !== -1 ||
-            boxText.indexOf('rating') !== -1 ||
-            ((scrollBody.parentElement && scrollBody.parentElement.textContent || '').toLowerCase().indexOf('рейтинг') !== -1);
+        const title = String(params.title || '').trim().toLowerCase();
+        const hasRatingTitle = title.indexOf('рейтинг') !== -1 || title.indexOf('rating') !== -1;
 
-        const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(function (item) {
-            return !item.classList.contains('lampa-fire-sort-option');
-        });
-        if (!items.length) return false;
-
-        const texts = items.map(function (item) {
-            return (item.textContent || '').trim().toLowerCase();
+        const itemTitles = params.items.map(function (it) {
+            return String((it && (it.title || it.name)) || '').trim().toLowerCase();
         }).filter(Boolean);
 
-        const yearLikeCount = texts.filter(function (t) {
+        const yearLikeCount = itemTitles.filter(function (t) {
             return /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t);
         }).length;
         if (yearLikeCount >= 2) return false;
 
-        const hasRatingRange = texts.some(function (t) {
+        const hasRatingRange = itemTitles.some(function (t) {
             return /^(від|от|from)\s+\d+/.test(t);
         });
 
-        return Boolean(hasRatingHeader || hasRatingRange);
+        return Boolean(hasRatingTitle || hasRatingRange);
     }
 
-    function injectIntoOpenSelectbox(rootNode) {
-        const scope = rootNode && rootNode.querySelectorAll ? rootNode : document;
+    function triggerFireSortSelection() {
+        wantFireSort = true;
 
-        const scrollBodies = Array.from(scope.querySelectorAll('.scroll__body')).filter(function (el) {
-            if (!(el instanceof HTMLElement)) return false;
-            const rect = el.getBoundingClientRect();
-            return rect.width > 0 && rect.height > 0;
-        });
-
-        for (let i = 0; i < scrollBodies.length; i++) {
-            const scrollBody = scrollBodies[i];
-            const existingOpt = scrollBody.querySelector('.lampa-fire-sort-option');
-            const validRating = isRatingScrollBody(scrollBody);
-
-            if (!validRating) {
-                if (existingOpt) existingOpt.remove();
-                continue;
-            }
-
-            if (existingOpt) continue;
-
-            const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(function (item) {
-                return !item.classList.contains('lampa-fire-sort-option');
-            });
-            if (!items.length) continue;
-
-            const sample = items[items.length - 1];
-            const opt = sample.cloneNode(true);
-            opt.classList.remove('active', 'focus', 'selected');
-            opt.classList.add('lampa-fire-sort-option');
-
-            const titleTarget = opt.querySelector('[class*="title"], span, div') || opt;
-            titleTarget.textContent = '🔥 + 👍 >';
-            opt.style.cursor = 'pointer';
-
-            const onPick = function (e) {
-                if (e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-                wantFireSort = true;
-
-                if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
-                    Lampa.Select.close();
-                } else {
-                    const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
-                    if (closeBtn) closeBtn.click();
-                }
-                setTimeout(function () {
-                    sortCardsByFire({ silentWhenEmpty: false });
-                }, 60);
-            };
-
-            opt.addEventListener('click', onPick, true);
-            opt.addEventListener('hover:enter', onPick, true);
-
-            const anyItem = items.find(function (item) {
-                const txt = (item.textContent || '').trim().toLowerCase();
-                return txt === 'будь-який' || txt === 'любой' || txt === 'any';
-            });
-
-            if (anyItem) {
-                anyItem.insertAdjacentElement('afterend', opt);
-            } else {
-                scrollBody.appendChild(opt);
-            }
+        if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
+            Lampa.Select.close();
+        } else {
+            const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
+            if (closeBtn) closeBtn.click();
         }
+
+        setTimeout(function () {
+            sortCardsByFire({ silentWhenEmpty: false });
+        }, 80);
+    }
+
+    function patchLampaSelect() {
+        if (!window.Lampa || !Lampa.Select || typeof Lampa.Select.show !== 'function') {
+            return false;
+        }
+        if (Lampa.Select.__fireSortPatched) return true;
+
+        const origShow = Lampa.Select.show.bind(Lampa.Select);
+
+        Lampa.Select.show = function (params) {
+            if (params && isRatingSelectParams(params)) {
+                const alreadyHas = params.items.some(function (it) {
+                    return it && it.__isFireSortOption;
+                });
+
+                if (!alreadyHas) {
+                    const newItems = params.items.slice();
+                    const fireItem = {
+                        title: '🔥 + 👍 >',
+                        __isFireSortOption: true
+                    };
+
+                    const anyIndex = newItems.findIndex(function (it) {
+                        const t = String((it && (it.title || it.name)) || '').trim().toLowerCase();
+                        return t === 'будь-який' || t === 'любой' || t === 'any';
+                    });
+
+                    if (anyIndex !== -1) {
+                        newItems.splice(anyIndex + 1, 0, fireItem);
+                    } else {
+                        newItems.unshift(fireItem);
+                    }
+
+                    const origOnSelect = params.onSelect;
+                    const origOnBack = params.onBack;
+
+                    params = Object.assign({}, params, {
+                        items: newItems,
+                        onSelect: function (item) {
+                            if (item && item.__isFireSortOption) {
+                                triggerFireSortSelection();
+                                if (typeof origOnBack === 'function') {
+                                    origOnBack();
+                                }
+                                return;
+                            }
+                            if (typeof origOnSelect === 'function') {
+                                return origOnSelect.apply(this, arguments);
+                            }
+                        }
+                    });
+                }
+            }
+
+            return origShow(params);
+        };
+
+        Lampa.Select.__fireSortPatched = true;
+        return true;
     }
 
     function bindSearchTriggers() {
         if (window.__lampaFireSortSearchBound) return;
         window.__lampaFireSortSearchBound = true;
 
-        const handleSearchClick = function (e) {
+        const handleSearchActivate = function (e) {
             if (!wantFireSort) return;
             const target = e.target instanceof HTMLElement ? e.target : null;
             if (!target) return;
@@ -389,12 +387,22 @@
             }
         };
 
-        document.addEventListener('click', handleSearchClick, true);
+        document.addEventListener('click', handleSearchActivate, true);
+        document.addEventListener('hover:enter', handleSearchActivate, true);
     }
 
     function init() {
-        injectIntoOpenSelectbox(document);
         bindSearchTriggers();
+
+        if (!patchLampaSelect()) {
+            let attempts = 0;
+            const waitTimer = setInterval(function () {
+                attempts++;
+                if (patchLampaSelect() || attempts > 50) {
+                    clearInterval(waitTimer);
+                }
+            }, 100);
+        }
 
         if (!window.__lampaFireSortObserver) {
             let timer = null;
@@ -402,7 +410,7 @@
                 if (timer) return;
                 timer = setTimeout(function () {
                     timer = null;
-                    injectIntoOpenSelectbox(document);
+                    patchLampaSelect();
 
                     if (wantFireSort && !isSorting) {
                         const hasUnsortedCards = mutations.some(function (m) {
