@@ -1,34 +1,20 @@
 function injectIntoOpenSelectbox(rootNode) {
         const scope = rootNode && rootNode.querySelectorAll ? rootNode : document;
 
-        // Шукаємо відкриті списки вибору або області, де з'являються пункти рейтингу
-        const candidates = Array.from(scope.querySelectorAll(
-            '.selectbox__body, .selectbox, .select, [class*="selectbox"], [class*="select__"], .scroll__body'
-        )).filter(el => {
+        const scrollBodies = Array.from(scope.querySelectorAll('.scroll__body')).filter(el => {
             if (!(el instanceof HTMLElement)) return false;
-            if (el.offsetParent === null) return false;
-            return true;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
         });
 
-        // Додаємо document.body про всяк випадок, якщо панель рендериться без проміжної обгортки
-        if (!candidates.includes(document.body)) {
-            candidates.push(document.body);
-        }
+        for (const scrollBody of scrollBodies) {
+            if (scrollBody.querySelector('.lampa-fire-sort-option')) continue;
 
-        for (const box of candidates) {
-            if (box.querySelector('.lampa-fire-sort-option')) continue;
+            const items = Array.from(scrollBody.querySelectorAll('.selectbox-item'));
+            if (!items.length) continue;
 
-            // Шукаємо елементи списку, які виглядають як варіанти рейтингу
-            const items = Array.from(box.querySelectorAll('div, li, button, a')).filter(el => {
-                if (!(el instanceof HTMLElement)) return false;
-                if (el.offsetParent === null) return false;
-                if (el.classList.contains('lampa-fire-sort-option')) return false;
-                // Беремо лише "листові" або майже листові пункти списку, не великі контейнери
-                if (el.children.length > 2) return false;
-
-                const txt = (el.textContent || '').trim().toLowerCase();
-                if (!txt || txt.length > 30) return false;
-
+            const isRatingMenu = items.some(item => {
+                const txt = (item.textContent || '').trim().toLowerCase();
                 return (
                     txt === 'будь-який' ||
                     txt === 'любой' ||
@@ -39,12 +25,9 @@ function injectIntoOpenSelectbox(rootNode) {
                 );
             });
 
-            if (!items.length) continue;
+            if (!isRatingMenu) continue;
 
             const sample = items[items.length - 1];
-            const parent = sample.parentElement;
-            if (!parent || parent.querySelector('.lampa-fire-sort-option')) continue;
-
             const opt = sample.cloneNode(true);
             opt.classList.remove('active', 'focus', 'selected');
             opt.classList.add('lampa-fire-sort-option');
@@ -66,13 +49,12 @@ function injectIntoOpenSelectbox(rootNode) {
                 }
                 setTimeout(() => {
                     sortCardsByFire();
-                }, 50);
+                }, 60);
             };
 
             opt.addEventListener('click', onPick, true);
             opt.addEventListener('hover:enter', onPick, true);
 
-            parent.appendChild(opt);
-            break;
+            scrollBody.appendChild(opt);
         }
     }
