@@ -6,13 +6,15 @@
 
     const cache = {};
     let isSorting = false;
+    let wantFireSort = false;
+    let autoSortTimer = null;
 
     function getCardData(el) {
         if (!el) return null;
         if (el.card_data && el.card_data.id) return el.card_data;
         if (window.$) {
             const $el = window.$(el);
-            const d = $el.data('card') || $el.data('item') \vert{}\vert{}$el.data('data');
+            const d = $el.data('card') || $el.data('item') || $el.data('data');
             if (d && d.id) return d;
         }
         return null;
@@ -133,17 +135,17 @@
             badge = document.createElement('div');
             badge.className = 'lampa-fire-sum-badge';
             badge.style.position = 'absolute';
-            badge.style.top = '8px';
-            badge.style.left = '8px';
+            badge.style.top = '6px';
+            badge.style.left = '6px';
             badge.style.zIndex = '15';
             badge.style.display = 'inline-flex';
             badge.style.alignItems = 'center';
-            badge.style.gap = '4px';
-            badge.style.padding = '2px 7px';
-            badge.style.borderRadius = '6px';
+            badge.style.gap = '5px';
+            badge.style.padding = '2px 8px';
+            badge.style.borderRadius = '8px';
             badge.style.background = 'rgba(0, 0, 0, 0.78)';
             badge.style.color = '#fff';
-            badge.style.fontSize = '12px';
+            badge.style.fontSize = '13px';
             badge.style.fontWeight = '700';
             badge.style.lineHeight = '1.2';
             badge.style.pointerEvents = 'none';
@@ -152,7 +154,7 @@
             const iconEl = document.createElement('span');
             iconEl.className = 'lampa-fire-sum-icon';
             iconEl.textContent = '⭐';
-            iconEl.style.fontSize = '16px';
+            iconEl.style.fontSize = '28px';
             iconEl.style.lineHeight = '1';
             iconEl.style.display = 'inline-block';
 
@@ -168,6 +170,11 @@
             }
 
             targetContainer.appendChild(badge);
+        }
+
+        const iconEl = badge.querySelector('.lampa-fire-sum-icon');
+        if (iconEl) {
+            iconEl.style.fontSize = '28px';
         }
 
         const valEl = badge.querySelector('.lampa-fire-sum-val');
@@ -187,19 +194,25 @@
         await Promise.all(runners);
     }
 
-    async function sortCardsByFire() {
+    async function sortCardsByFire(options = {}) {
+        const { silentWhenEmpty = false } = options;
         if (isSorting) return;
         isSorting = true;
 
         try {
-            if (window.Lampa && Lampa.Noty) {
-                Lampa.Noty.show('Сортування за 🔥 + 👍 >...');
-            }
-
             const visibleCards = Array.from(document.querySelectorAll('.card'))
                 .filter(el => el.offsetParent !== null && getCardData(el) !== null);
 
-            if (!visibleCards.length) return;
+            if (!visibleCards.length) {
+                if (!silentWhenEmpty && window.Lampa && Lampa.Noty) {
+                    Lampa.Noty.show('Режим 🔥 + 👍 > увімкнено. Натисніть «Розпочати пошук» або дочекайтесь карток.');
+                }
+                return;
+            }
+
+            if (window.Lampa && Lampa.Noty) {
+                Lampa.Noty.show('Сортування за 🔥 + 👍 >...');
+            }
 
             await runWithConcurrency(visibleCards, 6, async (card) => {
                 const data = getCardData(card);
@@ -253,6 +266,18 @@
         }
     }
 
+    function scheduleAutoSortIfNeeded() {
+        if (!wantFireSort || isSorting) return;
+        clearTimeout(autoSortTimer);
+        autoSortTimer = setTimeout(() => {
+            const hasCards = Array.from(document.querySelectorAll('.card'))
+                .some(el => el.offsetParent !== null && getCardData(el) !== null);
+            if (hasCards) {
+                sortCardsByFire({ silentWhenEmpty: true });
+            }
+        }, 350);
+    }
+
     function isRatingScrollBody(scrollBody) {
         const box = scrollBody.closest('.selectbox, .select, [class*="selectbox"], [class*="select"]') || scrollBody.parentElement;
         const boxText = (box && box.textContent ? box.textContent : '').toLowerCase();
@@ -269,4 +294,138 @@
 
         const texts = items.map(item => (item.textContent || '').trim().toLowerCase()).filter(Boolean);
 
-        const yearLikeCount = texts.filter(t => /^\d{4}(\s*[-–]\s*\d{
+        const yearLikeCount = texts.filter(t => /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t)).length;
+        if (yearLikeCount >= 2) return false;
+
+        const hasRatingRange = texts.some(t =>
+            /^(від|от|from)\s+\d+/.test(t) ||
+            /^(від|от|from)\s+\d+\s+(до|по|to)\s+\d+/.test(t)
+        );
+
+        return Boolean(hasRatingHeader || hasRatingRange);
+    }
+
+    function injectIntoOpenSelectbox(rootNode) {
+        const scope = rootNode && rootNode.querySelectorAll ? rootNode : document;
+
+        const scrollBodies = Array.from(scope.querySelectorAll('.scroll__body')).filter(el => {
+            if (!(el instanceof HTMLElement)) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        });
+
+        for (const scrollBody of scrollBodies) {
+            const existingOpt = scrollBody.querySelector('.lampa-fire-sort-option');
+            const validRating = isRatingScrollBody(scrollBody);
+
+            if (!validRating) {
+                if (existingOpt) existingOpt.remove();
+                continue;
+            }
+
+            if (existingOpt) continue;
+
+            const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(
+                item => !item.classList.contains('lampa-fire-sort-option')
+            );
+            if (!items.length) continue;
+
+            const sample = items[items.length - 1];
+            const opt = sample.cloneNode(true);
+            opt.classList.remove('active', 'focus', 'selected');
+            opt.classList.add('lampa-fire-sort-option');
+
+            const titleTarget = opt.querySelector('[class*="title"], span, div') || opt;
+            titleTarget.textContent = '🔥 + 👍 >';
+            opt.style.cursor = 'pointer';
+
+            const onPick = (e) => {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                wantFireSort = true;
+
+                if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
+                    Lampa.Select.close();
+                } else {
+                    const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
+                    if (closeBtn) closeBtn.click();
+                }
+                setTimeout(() => {
+                    sortCardsByFire({ silentWhenEmpty: false });
+                }, 60);
+            };
+
+            opt.addEventListener('click', onPick, true);
+            opt.addEventListener('hover:enter', onPick, true);
+
+            const anyItem = items.find(item => {
+                const txt = (item.textContent || '').trim().toLowerCase();
+                return txt === 'будь-який' || txt === 'любой' || txt === 'any';
+            });
+
+            if (anyItem) {
+                anyItem.insertAdjacentElement('afterend', opt);
+            } else {
+                scrollBody.appendChild(opt);
+            }
+        }
+    }
+
+    function bindSearchTriggers() {
+        if (window.__lampaFireSortSearchBound) return;
+        window.__lampaFireSortSearchBound = true;
+
+        const handleSearchClick = (e) => {
+            if (!wantFireSort) return;
+            const target = e.target instanceof HTMLElement ? e.target : null;
+            if (!target) return;
+            const txt = (target.textContent || '').trim().toLowerCase();
+            if (
+                txt.includes('розпочати пошук') ||
+                txt.includes('начать поиск') ||
+                txt.includes('start search') ||
+                target.closest('[class*="search"], [class*="submit"], [class*="apply"]')
+            ) {
+                setTimeout(() => scheduleAutoSortIfNeeded(), 400);
+            }
+        };
+
+        document.addEventListener('click', handleSearchClick, true);
+    }
+
+    function init() {
+        injectIntoOpenSelectbox(document);
+        bindSearchTriggers();
+
+        if (!window.__lampaFireSortObserver) {
+            let timer = null;
+            window.__lampaFireSortObserver = new MutationObserver((mutations) => {
+                if (timer) return;
+                timer = setTimeout(() => {
+                    timer = null;
+                    injectIntoOpenSelectbox(document);
+
+                    if (wantFireSort && !isSorting) {
+                        const hasUnsortedCards = mutations.some(m =>
+                            Array.from(m.addedNodes).some(n =>
+                                n instanceof HTMLElement &&
+                                (n.matches('.card') || (n.querySelector && n.querySelector('.card')))
+                            )
+                        );
+                        if (hasUnsortedCards) {
+                            scheduleAutoSortIfNeeded();
+                        }
+                    }
+                }, 60);
+            });
+            window.__lampaFireSortObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+    }
+
+    init();
+})();
