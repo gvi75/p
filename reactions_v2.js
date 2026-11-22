@@ -109,11 +109,11 @@
             likeBadge.style.display = 'inline-flex';
             likeBadge.style.alignItems = 'center';
             likeBadge.style.gap = '4px';
-            likeBadge.style.padding = '4px 9px';
+            likeBadge.style.padding = '6px 11px';
             likeBadge.style.borderRadius = '6px';
             likeBadge.style.background = 'rgba(20, 120, 55, 0.88)';
             likeBadge.style.color = '#fff';
-            likeBadge.style.fontSize = '15px';
+            likeBadge.style.fontSize = '17px';
             likeBadge.style.fontWeight = '700';
             likeBadge.style.lineHeight = '1.2';
           const dislikeBadge = document.createElement('span');
@@ -121,11 +121,11 @@
             dislikeBadge.style.display = 'inline-flex';
             dislikeBadge.style.alignItems = 'center';
             dislikeBadge.style.gap = '4px';
-            dislikeBadge.style.padding = '4px 9px';
+            dislikeBadge.style.padding = '6px 11px';
             dislikeBadge.style.borderRadius = '6px';
             dislikeBadge.style.background = 'rgba(145, 35, 35, 0.88)';
             dislikeBadge.style.color = '#fff';
-            dislikeBadge.style.fontSize = '15px';
+            dislikeBadge.style.fontSize = '17px';
             dislikeBadge.style.fontWeight = '700';
             dislikeBadge.style.lineHeight = '1.2';
 
