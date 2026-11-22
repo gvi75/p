@@ -178,12 +178,6 @@
                     el.style.overflowY = '';
                 }
             }
-
-            const lingeringBox = document.querySelector('.selectbox--open, .selector--open');
-            if (lingeringBox && lingeringBox.parentElement) {
-                const isEmpty = !lingeringBox.querySelector('.selectbox-item, .selector-item');
-                if (isEmpty) lingeringBox.remove();
-            }
         } catch (_) {}
     }
 
@@ -194,12 +188,15 @@
             }
         } catch (_) {}
 
-        const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
-        if (closeBtn instanceof HTMLElement) {
-            closeBtn.click();
-        }
-
         setTimeout(unlockScrollIfStuck, 50);
+    }
+
+    function resetPluginHiddenCards() {
+        const cards = Array.from(document.querySelectorAll('.card[data-hidden-by-plugin="1"]'));
+        for (let i = 0; i < cards.length; i++) {
+            cards[i].style.display = '';
+            delete cards[i].dataset.hiddenByPlugin;
+        }
     }
 
     function applyCardVisibilityFilters() {
@@ -496,7 +493,7 @@
         }
     }
 
-    function handleCustomDecadeSelect(item, origItems, origOnSelect) {
+    function handleCustomDecadeSelect(item) {
         const rangeLabel = String((item && (item.title || item.name)) || '').trim();
         selectedDecade = rangeLabel || null;
 
@@ -506,34 +503,6 @@
             }
         } catch (_) {}
 
-        const bounds = parseDecadeBounds(rangeLabel);
-        let matchedOrig = null;
-
-        if (Array.isArray(origItems) && bounds) {
-            matchedOrig = origItems.find(function (orig) {
-                if (!orig || typeof orig !== 'object' || orig.__isCustomDecadeOption) return false;
-                const cand = String(orig.value || orig.year || orig.title || orig.name || '');
-                const numMatch = cand.match(/\b(19\d\d|20\d\d)\b/);
-                if (!numMatch) return false;
-                const yr = Number(numMatch[1]);
-                return yr >= bounds.start && yr <= bounds.end;
-            }) || null;
-        }
-
-        if (typeof origOnSelect === 'function') {
-            try {
-                if (matchedOrig) {
-                    origOnSelect(Object.assign({}, matchedOrig, {
-                        title: rangeLabel,
-                        name: rangeLabel
-                    }));
-                } else {
-                    origOnSelect(item);
-                }
-            } catch (_) {}
-        }
-
-        applyCardVisibilityFilters();
         closeSelectCleanly();
 
         setTimeout(function () {
@@ -542,7 +511,7 @@
         }, 60);
 
         if (window.Lampa && Lampa.Noty) {
-            Lampa.Noty.show('Обрано період: ' + rangeLabel);
+            Lampa.Noty.show('Обрано період: ' + rangeLabel + '. Натисніть «Розпочати пошук».');
         }
     }
 
@@ -727,7 +696,7 @@
                         items: nextItems,
                         onSelect: function (item) {
                             if (isYearMenu && item && item.__isCustomDecadeOption) {
-                                handleCustomDecadeSelect(item, rawItems, origOnSelect);
+                                handleCustomDecadeSelect(item);
                                 return;
                             }
                             if (item && item.__isLikeSortOption) {
@@ -777,6 +746,7 @@
                 txt.indexOf('start search') !== -1 ||
                 target.closest('[class*="search"], [class*="submit"], [class*="apply"]')
             ) {
+                resetPluginHiddenCards();
                 setTimeout(function () {
                     unlockScrollIfStuck();
                     schedulePosterEnrich({ allowNotify: false });
