@@ -1,6 +1,7 @@
 (function () {
     'use strict';
 
+    if (window.__lampaFireSortLoaded) return;
     window.__lampaFireSortLoaded = true;
 
     const cache = {};
@@ -146,59 +147,77 @@
         }
     }
 
-    function injectOption(rootNode) {
+    function injectIntoOpenSelectbox(rootNode) {
         const scope = rootNode && rootNode.querySelectorAll ? rootNode : document;
 
-        const ratingTitles = Array.from(scope.querySelectorAll('*')).filter(el =>
-            el.children.length === 0 &&
-            ['рейтинг', 'rating'].includes((el.textContent || '').trim().toLowerCase())
-        );
+        // Шукаємо саме відкрите вікно вибору (selectbox), а не рядки бокової панелі "Фільтр"
+        const popups = Array.from(scope.querySelectorAll('.selectbox__body, .selectbox, [class*="selectbox__"]')).filter(el => {
+            if (!(el instanceof HTMLElement)) return false;
+            if (el.offsetParent === null) return false;
+            // Переконуємося, що це не бокова панель фільтра
+            const inFilterPanel = el.closest('.filter, [class*="filter__body"], .filter-body');
+            if (inFilterPanel && !el.closest('.selectbox')) return false;
+            return true;
+        });
 
-        ratingTitles.forEach(titleEl => {
-            const root = titleEl.closest('[class*="selectbox"]') || (titleEl.parentElement && titleEl.parentElement.parentElement);
-            if (!root) return;
+        popups.forEach(popup => {
+            const container = popup.querySelector('.selectbox__body, .scroll__body') || popup;
+            if (!container || container.querySelector('.lampa-fire-sort-option')) return;
 
-            const sampleBtn = Array.from(root.querySelectorAll('*')).find(el =>
-                el.children.length === 0 &&
-                ['будь-який', 'любой', 'any', 'все', 'всі'].includes((el.textContent || '').trim().toLowerCase())
-            );
+            const items = Array.from(container.querySelectorAll('.selectbox__item, .selector-item, [class*="item"]')).filter(el => {
+                if (!(el instanceof HTMLElement)) return false;
+                if (el.offsetParent === null) return false;
+                const txt = (el.textContent || '').trim().toLowerCase();
+                return ['будь-який', 'любой', 'any', 'всі', 'все', '0', '0.0'].some(k => txt === k || txt.startsWith(k + ' '));
+            });
 
-            const btnParent = sampleBtn ? sampleBtn.parentElement : root;
-            if (!btnParent || btnParent.querySelector('.lampa-fire-sort-btn')) return;
+            if (!items.length) return;
 
-            const btn = sampleBtn ? sampleBtn.cloneNode(true) : document.createElement('div');
-            btn.classList.remove('active', 'focus', 'selected');
-            btn.classList.add('lampa-fire-sort-btn');
-            btn.textContent = '🔥 >';
-            btn.style.cursor = 'pointer';
+            const sample = items[items.length - 1];
+            const parent = sample.parentElement;
+            if (!parent || parent.querySelector('.lampa-fire-sort-option')) return;
 
-            const onSelect = (e) => {
+            const opt = sample.cloneNode(true);
+            opt.classList.remove('active', 'focus', 'selected');
+            opt.classList.add('lampa-fire-sort-option');
+
+            // Замінюємо лише текстовий вузол або внутрішній блок назви, зберігаючи структуру елемента
+            const titleTarget = opt.querySelector('.selectbox__item-title, .title, span') || opt;
+            titleTarget.textContent = '🔥 >';
+            opt.style.cursor = 'pointer';
+
+            const onPick = (e) => {
                 if (e) {
                     e.preventDefault();
                     e.stopPropagation();
                 }
                 if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
                     Lampa.Select.close();
+                } else {
+                    const closeBtn = document.querySelector('.selectbox__close, .selector__close');
+                    if (closeBtn) closeBtn.click();
                 }
-                sortCardsByFire();
+                setTimeout(() => {
+                    sortCardsByFire();
+                }, 50);
             };
 
-            btn.addEventListener('click', onSelect);
-            btn.addEventListener('hover:enter', onSelect);
+            opt.addEventListener('click', onPick, true);
+            opt.addEventListener('hover:enter', onPick, true);
 
-            btnParent.appendChild(btn);
+            parent.appendChild(opt);
         });
     }
 
     function init() {
-        injectOption(document);
+        injectIntoOpenSelectbox(document);
 
         if (!window.__lampaFireSortObserver) {
             window.__lampaFireSortObserver = new MutationObserver((mutations) => {
                 for (const m of mutations) {
                     for (const node of m.addedNodes) {
                         if (node instanceof HTMLElement) {
-                            injectOption(node);
+                            injectIntoOpenSelectbox(node);
                         }
                     }
                 }
