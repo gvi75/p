@@ -31,7 +31,7 @@
         if (el.card_data && el.card_data.id) return el.card_data;
         if (window.$) {
             const $el = window.$(el);
-            const d = $el.data('card') || $el.data('item') || $el.data('data');
+            const d = $el.data('card') || $el.data('item') \vert{}\vert{}$el.data('data');
             if (d && d.id) return d;
         }
         return null;
@@ -339,6 +339,8 @@
 
     function schedulePosterEnrich() {
         clearTimeout(autoSortTimer);
+        function schedulePosterEnrich() {
+        clearTimeout(autoSortTimer);
         autoSortTimer = setTimeout(function () {
             applyWatchedFilter();
 
@@ -364,7 +366,13 @@
         if (!params || !Array.isArray(params.items) || !params.items.length) return false;
 
         const title = String(params.title || '').trim().toLowerCase();
-        if (title === 'рік' || title === 'год' || title === 'year' || title.indexOf('рік') !== -1 || title.indexOf('год') !== -1) {
+        if (
+            title === 'рік' ||
+            title === 'год' ||
+            title === 'year' ||
+            title.indexOf('рік') !== -1 ||
+            title.indexOf('год') !== -1
+        ) {
             return true;
         }
 
@@ -427,7 +435,11 @@
         if (isRatingSelectParams(params) || isYearSelectParams(params)) return false;
 
         const title = String(params.title || '').trim().toLowerCase();
-        if (title.indexOf('фільтр') !== -1 || title.indexOf('фильтр') !== -1 || title.indexOf('filter') !== -1) {
+        if (
+            title.indexOf('фільтр') !== -1 ||
+            title.indexOf('фильтр') !== -1 ||
+            title.indexOf('filter') !== -1
+        ) {
             return true;
         }
 
@@ -599,7 +611,9 @@
             ) {
                 setTimeout(function () { schedulePosterEnrich(); }, 400);
             }
-document.addEventListener('click', handleSearchActivate, true);
+        };
+
+        document.addEventListener('click', handleSearchActivate, true);
         document.addEventListener('hover:enter', handleSearchActivate, true);
     }
 
@@ -646,4 +660,3 @@ document.addEventListener('click', handleSearchActivate, true);
 
     init();
 })();
-            
