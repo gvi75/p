@@ -191,6 +191,34 @@
         }
     }
 
+    function isRatingScrollBody(scrollBody) {
+        const box = scrollBody.closest('.selectbox, .select, [class*="selectbox"], [class*="select"]') || scrollBody.parentElement;
+        const boxText = (box && box.textContent ? box.textContent : '').toLowerCase();
+
+        const hasRatingHeader =
+            /\bрейтинг\b/.test(boxText) ||
+            /\brating\b/.test(boxText) ||
+            /\bрейтинг\b/.test((scrollBody.parentElement && scrollBody.parentElement.textContent || '').toLowerCase());
+
+        const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(
+            item => !item.classList.contains('lampa-fire-sort-option')
+        );
+        if (!items.length) return false;
+
+        const texts = items.map(item => (item.textContent || '').trim().toLowerCase()).filter(Boolean);
+
+        // Відсікаємо списки з роками (наприклад, 2026, 2025, 2027-2022)
+        const yearLikeCount = texts.filter(t => /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t)).length;
+        if (yearLikeCount >= 2) return false;
+
+        const hasRatingRange = texts.some(t =>
+            /^(від|от|from)\s+\d+/.test(t) ||
+            /^(від|от|from)\s+\d+\s+(до|по|to)\s+\d+/.test(t)
+        );
+
+        return Boolean(hasRatingHeader || hasRatingRange);
+    }
+
     function injectIntoOpenSelectbox(rootNode) {
         const scope = rootNode && rootNode.querySelectorAll ? rootNode : document;
 
@@ -201,24 +229,20 @@
         });
 
         for (const scrollBody of scrollBodies) {
-            if (scrollBody.querySelector('.lampa-fire-sort-option')) continue;
+            const existingOpt = scrollBody.querySelector('.lampa-fire-sort-option');
+            const validRating = isRatingScrollBody(scrollBody);
 
-            const items = Array.from(scrollBody.querySelectorAll('.selectbox-item'));
+            if (!validRating) {
+                if (existingOpt) existingOpt.remove();
+                continue;
+            }
+
+            if (existingOpt) continue;
+
+            const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(
+                item => !item.classList.contains('lampa-fire-sort-option')
+            );
             if (!items.length) continue;
-
-            const isRatingMenu = items.some(item => {
-                const txt = (item.textContent || '').trim().toLowerCase();
-                return (
-                    txt === 'будь-який' ||
-                    txt === 'любой' ||
-                    txt === 'any' ||
-                    /^від\s+\d+/.test(txt) ||
-                    /^от\s+\d+/.test(txt) ||
-                    /^from\s+\d+/.test(txt)
-                );
-            });
-
-            if (!isRatingMenu) continue;
 
             const sample = items[items.length - 1];
             const opt = sample.cloneNode(true);
