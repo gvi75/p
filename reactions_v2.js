@@ -13,12 +13,25 @@
     const POSITIVE_TYPES = ['fire', 'nice', 'think'];
     const NEGATIVE_TYPES = ['bore', 'shit'];
 
+    const CUSTOM_DECADE_RANGES = [
+        '2020 - 2029',
+        '2010 - 2019',
+        '2000 - 2009',
+        '1990 - 1999',
+        '1980 - 1989',
+        '1970 - 1979',
+        '1960 - 1969',
+        '1950 - 1959',
+        '1940 - 1949',
+        '1930 - 1939'
+    ];
+
     function getCardData(el) {
         if (!el) return null;
         if (el.card_data && el.card_data.id) return el.card_data;
         if (window.$) {
             const $el = window.$(el);
-            const d = $el.data('card') || $el.data('item') || $el.data('data');
+            const d = $el.data('card') || $el.data('item') \vert{}\vert{}$el.data('data');
             if (d && d.id) return d;
         }
         return null;
@@ -347,6 +360,46 @@
         }, 300);
     }
 
+    function isYearSelectParams(params) {
+        if (!params || !Array.isArray(params.items) || !params.items.length) return false;
+
+        const title = String(params.title || '').trim().toLowerCase();
+        if (title === 'рік' || title === 'год' || title === 'year' || title.indexOf('рік') !== -1 || title.indexOf('год') !== -1) {
+            return true;
+        }
+
+        const itemTitles = params.items.map(function (it) {
+            return String((it && (it.title || it.name)) || '').trim().toLowerCase();
+        }).filter(Boolean);
+
+        const yearLikeCount = itemTitles.filter(function (t) {
+            return /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t);
+        }).length;
+
+        return yearLikeCount >= 3;
+    }
+
+    function buildDecadeItems(origItems) {
+        const sample = Array.isArray(origItems) ? origItems.find(function (it) {
+            return it && typeof it === 'object';
+        }) : null;
+
+        return CUSTOM_DECADE_RANGES.map(function (rangeLabel) {
+            const compactValue = rangeLabel.replace(/\s+/g, '');
+            const base = sample ? Object.assign({}, sample) : {};
+            delete base.selected;
+            delete base.active;
+            delete base.checkbox;
+            base.title = rangeLabel;
+            base.name = rangeLabel;
+            base.value = compactValue;
+            base.year = compactValue;
+            base.years = compactValue;
+            base.__isCustomDecadeOption = true;
+            return base;
+        });
+    }
+
     function isRatingSelectParams(params) {
         if (!params || !Array.isArray(params.items) || !params.items.length) return false;
 
@@ -371,7 +424,7 @@
 
     function isFilterLikeSelectParams(params) {
         if (!params || !Array.isArray(params.items) || params.items.length < 2) return false;
-        if (isRatingSelectParams(params)) return false;
+        if (isRatingSelectParams(params) || isYearSelectParams(params)) return false;
 
         const title = String(params.title || '').trim().toLowerCase();
         if (title.indexOf('фільтр') !== -1 || title.indexOf('фильтр') !== -1 || title.indexOf('filter') !== -1) {
@@ -450,7 +503,15 @@
                 const origOnSelect = params.onSelect;
                 const origOnBack = params.onBack;
 
-                if (isRatingSelectParams(params)) {
+                if (isYearSelectParams(params)) {
+                    const alreadyDecades = nextItems.some(function (it) {
+                        return it && it.__isCustomDecadeOption;
+                    });
+                    if (!alreadyDecades) {
+                        nextItems = buildDecadeItems(nextItems);
+                        modified = true;
+                    }
+                } else if (isRatingSelectParams(params)) {
                     const alreadyHasRating = nextItems.some(function (it) {
                         return it && it.__isLikeSortOption;
                     });
@@ -538,52 +599,3 @@
             ) {
                 setTimeout(function () { schedulePosterEnrich(); }, 400);
             }
-        };
-
-        document.addEventListener('click', handleSearchActivate, true);
-        document.addEventListener('hover:enter', handleSearchActivate, true);
-    }
-
-    function init() {
-        bindSearchTriggers();
-        schedulePosterEnrich();
-
-        if (!patchLampaSelect()) {
-            let attempts = 0;
-            const waitTimer = setInterval(function () {
-                attempts++;
-                if (patchLampaSelect() || attempts > 50) {
-                    clearInterval(waitTimer);
-                }
-            }, 100);
-        }
-
-        if (!window.__lampaLikeSortObserver) {
-            let timer = null;
-            window.__lampaLikeSortObserver = new MutationObserver(function (mutations) {
-                if (timer) return;
-                timer = setTimeout(function () {
-                    timer = null;
-                    patchLampaSelect();
-                    applyWatchedFilter();
-
-                    const hasNewCards = mutations.some(function (m) {
-                        return Array.from(m.addedNodes).some(function (n) {
-                            return n instanceof HTMLElement &&
-                                (n.matches('.card') || (n.querySelector && n.querySelector('.card')));
-                        });
-                    });
-                    if (hasNewCards) {
-                        schedulePosterEnrich();
-                    }
-                }, 80);
-            });
-            window.__lampaLikeSortObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-        }
-    }
-
-    init();
-})();
