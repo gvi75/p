@@ -599,3 +599,51 @@
             ) {
                 setTimeout(function () { schedulePosterEnrich(); }, 400);
             }
+document.addEventListener('click', handleSearchActivate, true);
+        document.addEventListener('hover:enter', handleSearchActivate, true);
+    }
+
+    function init() {
+        bindSearchTriggers();
+        schedulePosterEnrich();
+
+        if (!patchLampaSelect()) {
+            let attempts = 0;
+            const waitTimer = setInterval(function () {
+                attempts++;
+                if (patchLampaSelect() || attempts > 50) {
+                    clearInterval(waitTimer);
+                }
+            }, 100);
+        }
+
+        if (!window.__lampaLikeSortObserver) {
+            let timer = null;
+            window.__lampaLikeSortObserver = new MutationObserver(function (mutations) {
+                if (timer) return;
+                timer = setTimeout(function () {
+                    timer = null;
+                    patchLampaSelect();
+                    applyWatchedFilter();
+
+                    const hasNewCards = mutations.some(function (m) {
+                        return Array.from(m.addedNodes).some(function (n) {
+                            return n instanceof HTMLElement &&
+                                (n.matches('.card') || (n.querySelector && n.querySelector('.card')));
+                        });
+                    });
+                    if (hasNewCards) {
+                        schedulePosterEnrich();
+                    }
+                }, 80);
+            });
+            window.__lampaLikeSortObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+    }
+
+    init();
+})();
+            
