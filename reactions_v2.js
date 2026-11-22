@@ -8,24 +8,10 @@
     let isSorting = false;
     let wantLikeSort = false;
     let hideWatched = false;
-    let selectedDecade = null;
     let autoSortTimer = null;
 
     const POSITIVE_TYPES = ['fire', 'nice', 'think'];
     const NEGATIVE_TYPES = ['bore', 'shit'];
-
-    const CUSTOM_DECADE_RANGES = [
-        '2020 - 2029',
-        '2010 - 2019',
-        '2000 - 2009',
-        '1990 - 1999',
-        '1980 - 1989',
-        '1970 - 1979',
-        '1960 - 1969',
-        '1950 - 1959',
-        '1940 - 1949',
-        '1930 - 1939'
-    ];
 
     function getCardData(el) {
         if (!el) return null;
@@ -36,41 +22,6 @@
             if (d && d.id) return d;
         }
         return null;
-    }
-
-    function getCardYear(card, data) {
-        const candidates = [
-            data && data.release_date,
-            data && data.first_air_date,
-            data && data.year,
-            data && data.release_year
-        ];
-
-        for (let i = 0; i < candidates.length; i++) {
-            const val = candidates[i];
-            if (val === undefined || val === null) continue;
-            const match = String(val).match(/\b(19\d\d|20\d\d)\b/);
-            if (match) return Number(match[1]);
-        }
-
-        if (card) {
-            const yearEl = card.querySelector('.card__year, .card__age, [class*="year"]');
-            if (yearEl) {
-                const domMatch = String(yearEl.textContent || '').match(/\b(19\d\d|20\d\d)\b/);
-                if (domMatch) return Number(domMatch[1]);
-            }
-        }
-
-        return null;
-    }
-
-    function parseDecadeBounds(label) {
-        const match = String(label || '').match(/(\d{4})\s*[-–]\s*(\d{4})/);
-        if (!match) return null;
-        return {
-            start: Number(match[1]),
-            end: Number(match[2])
-        };
     }
 
     function getMethod(data) {
@@ -167,48 +118,30 @@
         return false;
     }
 
-    function isCardHiddenByPlugin(card) {
-        return card.dataset.hiddenWatched === '1' || card.dataset.hiddenDecade === '1';
-    }
-
-    function applyCardFilters() {
+    function applyWatchedFilter() {
         const cards = Array.from(document.querySelectorAll('.card'));
         if (!cards.length) return;
 
         const watchedIds = hideWatched ? collectWatchedIds() : null;
-        const decadeBounds = selectedDecade ? parseDecadeBounds(selectedDecade) : null;
 
         for (let i = 0; i < cards.length; i++) {
             const card = cards[i];
-            const data = getCardData(card);
-            if (!data) continue;
+            if (!getCardData(card)) continue;
 
-            const shouldHideWatched = Boolean(hideWatched && isCardWatched(card, watchedIds));
-            let shouldHideDecade = false;
-
-            if (decadeBounds) {
-                const yr = getCardYear(card, data);
-                if (yr !== null && (yr < decadeBounds.start || yr > decadeBounds.end)) {
-                    shouldHideDecade = true;
+            if (!hideWatched) {
+                if (card.dataset.hiddenByPlugin === '1') {
+                    card.style.display = '';
+                    delete card.dataset.hiddenByPlugin;
                 }
+                continue;
             }
 
-            if (shouldHideWatched) {
-                card.dataset.hiddenWatched = '1';
-            } else {
-                delete card.dataset.hiddenWatched;
-            }
-
-            if (shouldHideDecade) {
-                card.dataset.hiddenDecade = '1';
-            } else {
-                delete card.dataset.hiddenDecade;
-            }
-
-            if (shouldHideWatched || shouldHideDecade) {
+            if (isCardWatched(card, watchedIds)) {
                 card.style.display = 'none';
-            } else if (card.style.display === 'none') {
+                card.dataset.hiddenByPlugin = '1';
+            } else if (card.dataset.hiddenByPlugin === '1') {
                 card.style.display = '';
+                delete card.dataset.hiddenByPlugin;
             }
         }
     }
@@ -334,8 +267,7 @@
     }
 
     async function sortCardsByLikes(options) {
-        const opts = options || {};
-        const silent = Boolean(opts.silent);
+        const silentWhenEmpty = Boolean(options && options.silentWhenEmpty);
         if (isSorting) return;
         isSorting = true;
 
@@ -344,17 +276,17 @@
                 .filter(function (el) {
                     return el.offsetParent !== null &&
                         getCardData(el) !== null &&
-                        !isCardHiddenByPlugin(el);
+                        el.dataset.hiddenByPlugin !== '1';
                 });
 
             if (!visibleCards.length) {
-                if (!silent && window.Lampa && Lampa.Noty) {
+                if (!silentWhenEmpty && window.Lampa && Lampa.Noty) {
                     Lampa.Noty.show('Сортування за 👍 > увімкнено. Натисніть «Розпочати пошук» або дочекайтесь карток.');
                 }
                 return;
             }
 
-            if (!silent && window.Lampa && Lampa.Noty) {
+            if (window.Lampa && Lampa.Noty) {
                 Lampa.Noty.show('Сортування за лайками (👍 >)...');
             }
 
@@ -382,9 +314,9 @@
                 cards.forEach(function (card) { parent.appendChild(card); });
             });
 
-            applyCardFilters();
+            applyWatchedFilter();
 
-            if (!silent && window.Lampa && Lampa.Noty) {
+            if (window.Lampa && Lampa.Noty) {
                 Lampa.Noty.show('Відсортовано за лайками (👍 >)');
             }
         } finally {
@@ -392,44 +324,34 @@
         }
     }
 
-    function schedulePosterEnrich(options) {
-        const opts = options || {};
-        const allowNotify = Boolean(opts.allowNotify);
+    function schedulePosterEnrich() {
         clearTimeout(autoSortTimer);
         autoSortTimer = setTimeout(function () {
-            applyCardFilters();
+            applyWatchedFilter();
 
             const visibleCards = Array.from(document.querySelectorAll('.card'))
                 .filter(function (el) {
                     return el.offsetParent !== null &&
                         getCardData(el) !== null &&
-                        !isCardHiddenByPlugin(el) &&
+                        el.dataset.hiddenByPlugin !== '1' &&
                         !el.querySelector('.lampa-like-dislike-wrap');
                 });
 
             if (!visibleCards.length) return;
 
             if (wantLikeSort) {
-                sortCardsByLikes({ silent: !allowNotify });
+                sortCardsByLikes({ silentWhenEmpty: true });
             } else {
                 populatePosterReactions(visibleCards);
             }
         }, 300);
     }
 
-    function isYearSelectParams(params) {
+    function isRatingSelectParams(params) {
         if (!params || !Array.isArray(params.items) || !params.items.length) return false;
 
         const title = String(params.title || '').trim().toLowerCase();
-        if (
-            title === 'рік' ||
-            title === 'год' ||
-            title === 'year' ||
-            title.indexOf('рік') !== -1 ||
-            title.indexOf('год') !== -1
-        ) {
-            return true;
-        }
+        const hasRatingTitle = title.indexOf('рейтинг') !== -1 || title.indexOf('rating') !== -1;
 
         const itemTitles = params.items.map(function (it) {
             return String((it && (it.title || it.name)) || '').trim().toLowerCase();
@@ -438,121 +360,21 @@
         const yearLikeCount = itemTitles.filter(function (t) {
             return /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t);
         }).length;
+        if (yearLikeCount >= 2) return false;
 
-        return yearLikeCount >= 3;
-    }
-
-    function applyYearLabelInFilterUi(label) {
-        const rows = Array.from(document.querySelectorAll('.selectbox-item, .selector-item, .filter-item, .list-item'));
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            if (!(row instanceof HTMLElement)) continue;
-            const titleEl = row.querySelector('.selectbox-item__title, .selector-item__title, .filter-item__title, .title');
-            const titleText = String((titleEl ? titleEl.textContent : row.textContent) || '').trim().toLowerCase();
-            if (titleText === 'рік' || titleText === 'год' || titleText === 'year') {
-                let valueNode = row.querySelector('.lampa-selected-decade-label');
-                if (!label) {
-                    if (valueNode) valueNode.remove();
-                    continue;
-                }
-                if (!valueNode) {
-                    valueNode = document.createElement('span');
-                    valueNode.className = 'lampa-selected-decade-label';
-                    valueNode.style.marginLeft = '8px';
-                    valueNode.style.opacity = '0.85';
-                    row.appendChild(valueNode);
-                }
-                valueNode.textContent = label;
-            }
-        }
-    }
-
-    function setSelectedDecadeValue(decadeLabel) {
-        selectedDecade = decadeLabel || null;
-        try {
-            if (window.Lampa && Lampa.Storage && typeof Lampa.Storage.set === 'function') {
-                Lampa.Storage.set('lampa_custom_decade_range', selectedDecade);
-            }
-        } catch (_) {}
-
-        applyCardFilters();
-        setTimeout(function () {
-            applyYearLabelInFilterUi(selectedDecade);
-        }, 60);
-    }
-
-    function buildDecadeItems(origItems) {
-        const sample = Array.isArray(origItems) ? origItems.find(function (it) {
-            return it && typeof it === 'object';
-        }) : null;
-
-        const resetItem = {
-            title: 'Будь-який',
-            name: 'Будь-який',
-            value: '',
-            __isResetDecadeOption: true
-        };
-
-        const decadeItems = CUSTOM_DECADE_RANGES.map(function (rangeLabel) {
-            const compactValue = rangeLabel.replace(/\s+/g, '');
-            const base = sample ? Object.assign({}, sample) : {};
-            delete base.selected;
-            delete base.active;
-            delete base.checkbox;
-            base.title = rangeLabel;
-            base.name = rangeLabel;
-            base.value = compactValue;
-            base.year = compactValue;
-            base.years = compactValue;
-            base.__isCustomDecadeOption = true;
-            return base;
+        const hasRatingRange = itemTitles.some(function (t) {
+            return /^(від|от|from)\s+\d+/.test(t);
         });
 
-        return [resetItem].concat(decadeItems);
-    }
-
-    function isRatingSelectParams(params) {
-        if (!params || !Array.isArray(params.items) || !params.items.length) return false;
-        if (isYearSelectParams(params)) return false;
-
-        const title = String(params.title || '').trim().toLowerCase();
-        if (
-            title.indexOf('рейтинг') !== -1 ||
-            title.indexOf('рейтінг') !== -1 ||
-            title.indexOf('rating') !== -1
-        ) {
-            return true;
-        }
-
-        const itemTitles = params.items.map(function (it) {
-            return String((it && (it.title || it.name)) || '').trim().toLowerCase();
-        }).filter(Boolean);
-
-        const hasAnyOption = itemTitles.some(function (t) {
-            return t === 'будь-який' || t === 'любой' || t === 'any' || t === 'все' || t === 'всі';
-        });
-
-        const hasRatingPatterns = itemTitles.some(function (t) {
-            return (
-                /^(від|от|from|понад|свыше|over)\s*\d+/.test(t) ||
-                /^\d+(\.\d+)?\s*(\+|>\s*|=|>)/.test(t) ||
-                /^[1-9](\.\d+)?$/.test(t)
-            );
-        });
-
-        return Boolean(hasAnyOption && hasRatingPatterns);
+        return Boolean(hasRatingTitle || hasRatingRange);
     }
 
     function isFilterLikeSelectParams(params) {
         if (!params || !Array.isArray(params.items) || params.items.length < 2) return false;
-        if (isRatingSelectParams(params) || isYearSelectParams(params)) return false;
+        if (isRatingSelectParams(params)) return false;
 
         const title = String(params.title || '').trim().toLowerCase();
-        if (
-            title.indexOf('фільтр') !== -1 ||
-            title.indexOf('фильтр') !== -1 ||
-            title.indexOf('filter') !== -1
-        ) {
+        if (title.indexOf('фільтр') !== -1 || title.indexOf('фильтр') !== -1 || title.indexOf('filter') !== -1) {
             return true;
         }
 
@@ -580,7 +402,14 @@
 
     function toggleHideWatched() {
         hideWatched = !hideWatched;
-        applyCardFilters();
+        applyWatchedFilter();
+
+        if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
+            Lampa.Select.close();
+        } else {
+            const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
+            if (closeBtn) closeBtn.click();
+        }
 
         if (window.Lampa && Lampa.Noty) {
             Lampa.Noty.show(
@@ -593,8 +422,16 @@
 
     function triggerLikeSortSelection() {
         wantLikeSort = true;
+
+        if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
+            Lampa.Select.close();
+        } else {
+            const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
+            if (closeBtn) closeBtn.click();
+        }
+
         setTimeout(function () {
-            sortCardsByLikes({ silent: false });
+            sortCardsByLikes({ silentWhenEmpty: false });
         }, 80);
     }
 
@@ -608,21 +445,12 @@
 
         Lampa.Select.show = function (params) {
             if (params && Array.isArray(params.items)) {
-                const rawItems = params.items.slice();
-                let nextItems = rawItems.slice();
+                let nextItems = params.items.slice();
                 let modified = false;
-                const isYearMenu = isYearSelectParams(params);
                 const origOnSelect = params.onSelect;
+                const origOnBack = params.onBack;
 
-                if (isYearMenu) {
-                    const alreadyDecades = nextItems.some(function (it) {
-                        return it && (it.__isCustomDecadeOption || it.__isResetDecadeOption);
-                    });
-                    if (!alreadyDecades) {
-                        nextItems = buildDecadeItems(rawItems);
-                        modified = true;
-                    }
-                } else if (isRatingSelectParams(params)) {
+                if (isRatingSelectParams(params)) {
                     const alreadyHasRating = nextItems.some(function (it) {
                         return it && it.__isLikeSortOption;
                     });
@@ -630,13 +458,12 @@
                     if (!alreadyHasRating) {
                         const likeOption = {
                             title: '👍 >',
-                            name: '👍 >',
                             __isLikeSortOption: true
                         };
 
                         const anyIndex = nextItems.findIndex(function (it) {
                             const t = String((it && (it.title || it.name)) || '').trim().toLowerCase();
-                            return t === 'будь-який' || t === 'любой' || t === 'any' || t === 'все' || t === 'всі';
+                            return t === 'будь-який' || t === 'любой' || t === 'any';
                         });
 
                         if (anyIndex !== -1) {
@@ -656,7 +483,6 @@
                     if (!alreadyHasHide) {
                         nextItems.push({
                             title: getHideWatchedLabel(),
-                            name: getHideWatchedLabel(),
                             __isHideWatchedOption: true
                         });
                         modified = true;
@@ -667,33 +493,18 @@
                     params = Object.assign({}, params, {
                         items: nextItems,
                         onSelect: function (item) {
-                            if (isYearMenu && item && item.__isResetDecadeOption) {
-                                setSelectedDecadeValue(null);
-                                if (window.Lampa && Lampa.Noty) {
-                                    Lampa.Noty.show('Фільтр десятиліття скинуто');
-                                }
-                                if (typeof origOnSelect === 'function') {
-                                    return origOnSelect.apply(this, arguments);
-                                }
-                                return;
-                            }
-                            if (isYearMenu && item && item.__isCustomDecadeOption) {
-                                const label = String((item.title || item.name) || '').trim() || null;
-                                setSelectedDecadeValue(label);
-                                if (window.Lampa && Lampa.Noty && label) {
-                                    Lampa.Noty.show('Обрано період: ' + label);
-                                }
-                                if (typeof origOnSelect === 'function') {
-                                    return origOnSelect.apply(this, arguments);
-                                }
-                                return;
-                            }
                             if (item && item.__isLikeSortOption) {
                                 triggerLikeSortSelection();
+                                if (typeof origOnBack === 'function') {
+                                    origOnBack();
+                                }
                                 return;
                             }
                             if (item && item.__isHideWatchedOption) {
                                 toggleHideWatched();
+                                if (typeof origOnBack === 'function') {
+                                    origOnBack();
+                                }
                                 return;
                             }
                             if (typeof origOnSelect === 'function') {
@@ -704,15 +515,7 @@
                 }
             }
 
-            const result = origShow(params);
-
-            if (selectedDecade && isFilterLikeSelectParams(params)) {
-                setTimeout(function () {
-                    applyYearLabelInFilterUi(selectedDecade);
-                }, 50);
-            }
-
-            return result;
+            return origShow(params);
         };
 
         Lampa.Select.__likeSortPatched = true;
@@ -733,9 +536,7 @@
                 txt.indexOf('start search') !== -1 ||
                 target.closest('[class*="search"], [class*="submit"], [class*="apply"]')
             ) {
-                setTimeout(function () {
-                    schedulePosterEnrich({ allowNotify: false });
-                }, 400);
+                setTimeout(function () { schedulePosterEnrich(); }, 400);
             }
         };
 
@@ -744,17 +545,8 @@
     }
 
     function init() {
-        try {
-            if (window.Lampa && Lampa.Storage && typeof Lampa.Storage.get === 'function') {
-                const saved = Lampa.Storage.get('lampa_custom_decade_range');
-                if (typeof saved === 'string' && saved.trim()) {
-                    selectedDecade = saved.trim();
-                }
-            }
-        } catch (_) {}
-
         bindSearchTriggers();
-        schedulePosterEnrich({ allowNotify: false });
+        schedulePosterEnrich();
 
         if (!patchLampaSelect()) {
             let attempts = 0;
@@ -773,10 +565,7 @@
                 timer = setTimeout(function () {
                     timer = null;
                     patchLampaSelect();
-                    applyCardFilters();
-                    if (selectedDecade) {
-                        applyYearLabelInFilterUi(selectedDecade);
-                    }
+                    applyWatchedFilter();
 
                     const hasNewCards = mutations.some(function (m) {
                         return Array.from(m.addedNodes).some(function (n) {
@@ -785,9 +574,9 @@
                         });
                     });
                     if (hasNewCards) {
-                        schedulePosterEnrich({ allowNotify: false });
+                        schedulePosterEnrich();
                     }
-                }, 150);
+                }, 80);
             });
             window.__lampaLikeSortObserver.observe(document.body, {
                 childList: true,
