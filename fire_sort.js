@@ -43,15 +43,15 @@
         const num = Number(val) || 0;
         if (num >= 1000) {
             const k = (num / 1000).toFixed(1).replace(/\.0$/, '');
-            return `${k}K`;
+            return k + 'K';
         }
         return String(Math.round(num * 10) / 10);
     }
 
     function getPositiveScoreFromList(list) {
         if (!Array.isArray(list)) return 0;
-        const fireItem = list.find(item => item && item.type === 'fire');
-        const niceItem = list.find(item => item && item.type === 'nice');
+        const fireItem = list.find(function (item) { return item && item.type === 'fire'; });
+        const niceItem = list.find(function (item) { return item && item.type === 'nice'; });
 
         const fireCount = fireItem && typeof fireItem.counter === 'number' ? fireItem.counter : 0;
         const niceCount = niceItem && typeof niceItem.counter === 'number' ? niceItem.counter : 0;
@@ -60,19 +60,19 @@
     }
 
     async function fetchPositiveScore(method, id) {
-        const key = `${method}_${id}`;
+        const key = method + '_' + id;
         if (Object.prototype.hasOwnProperty.call(cache, key)) {
             return cache[key];
         }
 
         const urls = [
-            `https://cub.best/api/reactions/get/${key}`,
-            `https://cub.rip/api/reactions/get/${key}`
+            'https://cub.best/api/reactions/get/' + key,
+            'https://cub.rip/api/reactions/get/' + key
         ];
 
-        for (const url of urls) {
+        for (let i = 0; i < urls.length; i++) {
             try {
-                const res = await fetch(url);
+                const res = await fetch(urls[i]);
                 if (res.ok) {
                     const data = await res.json();
                     const list = Array.isArray(data && data.result) ? data.result : [];
@@ -94,7 +94,7 @@
         const fireBadge = card.querySelector('.card__reaction-fire, [class*="fire"]');
         if (fireBadge && fireBadge.textContent) {
             const v = parseMetricValue(fireBadge.textContent);
-            if (v > 0 || /0/.test(fireBadge.textContent)) {
+            if (v > 0 || fireBadge.textContent.indexOf('0') !== -1) {
                 total += v;
                 foundAny = true;
             }
@@ -103,22 +103,8 @@
         const niceBadge = card.querySelector('.card__reaction-nice, [class*="nice"]');
         if (niceBadge && niceBadge.textContent) {
             const v = parseMetricValue(niceBadge.textContent);
-            if (v > 0 || /0/.test(niceBadge.textContent)) {
+            if (v > 0 || niceBadge.textContent.indexOf('0') !== -1) {
                 total += v;
-                foundAny = true;
-            }
-        }
-
-        if (!foundAny) {
-            const text = card.textContent || '';
-            const fireMatch = text.match(/🔥\s*([\d]+(?:[.,]\d+)?\s*K?)/i);
-            const niceMatch = text.match(/👍\s*([\d]+(?:[.,]\d+)?\s*K?)/i);
-            if (fireMatch) {
-                total += parseMetricValue(fireMatch[1]);
-                foundAny = true;
-            }
-            if (niceMatch) {
-                total += parseMetricValue(niceMatch[1]);
                 foundAny = true;
             }
         }
@@ -191,7 +177,7 @@
 
     async function runWithConcurrency(items, limit, worker) {
         const queue = items.slice();
-        const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+        const runners = Array.from({ length: Math.min(limit, queue.length) }, async function () {
             while (queue.length) {
                 const item = queue.shift();
                 await worker(item);
@@ -200,14 +186,14 @@
         await Promise.all(runners);
     }
 
-    async function sortCardsByFire(options = {}) {
-        const { silentWhenEmpty = false } = options;
+    async function sortCardsByFire(options) {
+        const silentWhenEmpty = Boolean(options && options.silentWhenEmpty);
         if (isSorting) return;
         isSorting = true;
 
         try {
             const visibleCards = Array.from(document.querySelectorAll('.card'))
-                .filter(el => el.offsetParent !== null && getCardData(el) !== null);
+                .filter(function (el) { return el.offsetParent !== null && getCardData(el) !== null; });
 
             if (!visibleCards.length) {
                 if (!silentWhenEmpty && window.Lampa && Lampa.Noty) {
@@ -220,9 +206,9 @@
                 Lampa.Noty.show('Сортування за 🔥 + 👍 >...');
             }
 
-            await runWithConcurrency(visibleCards, 6, async (card) => {
+            await runWithConcurrency(visibleCards, 6, async function (card) {
                 const data = getCardData(card);
-                const key = data && data.id ? `${getMethod(data)}_${data.id}` : null;
+                const key = data && data.id ? (getMethod(data) + '_' + data.id) : null;
 
                 let score = null;
                 if (key && Object.prototype.hasOwnProperty.call(cache, key)) {
@@ -244,24 +230,25 @@
             });
 
             const groups = new Map();
-            for (const card of visibleCards) {
+            for (let i = 0; i < visibleCards.length; i++) {
+                const card = visibleCards[i];
                 const parent = card.parentElement;
                 if (!parent) continue;
                 if (!groups.has(parent)) groups.set(parent, []);
                 groups.get(parent).push(card);
             }
 
-            groups.forEach((cards, parent) => {
+            groups.forEach(function (cards, parent) {
                 if (cards.length < 2) return;
 
-                cards.sort((a, b) => {
+                cards.sort(function (a, b) {
                     const fa = parseFloat(a.dataset.fireSortCount || '0') || 0;
                     const fb = parseFloat(b.dataset.fireSortCount || '0') || 0;
                     if (fb !== fa) return fb - fa;
                     return 0;
                 });
 
-                cards.forEach(card => parent.appendChild(card));
+                cards.forEach(function (card) { parent.appendChild(card); });
             });
 
             if (window.Lampa && Lampa.Noty) {
@@ -275,9 +262,9 @@
     function scheduleAutoSortIfNeeded() {
         if (!wantFireSort || isSorting) return;
         clearTimeout(autoSortTimer);
-        autoSortTimer = setTimeout(() => {
+        autoSortTimer = setTimeout(function () {
             const hasCards = Array.from(document.querySelectorAll('.card'))
-                .some(el => el.offsetParent !== null && getCardData(el) !== null);
+                .some(function (el) { return el.offsetParent !== null && getCardData(el) !== null; });
             if (hasCards) {
                 sortCardsByFire({ silentWhenEmpty: true });
             }
@@ -289,15 +276,106 @@
         const boxText = (box && box.textContent ? box.textContent : '').toLowerCase();
 
         const hasRatingHeader =
-            /\bрейтинг\b/.test(boxText) ||
-            /\brating\b/.test(boxText) ||
-            /\bрейтинг\b/.test((scrollBody.parentElement && scrollBody.parentElement.textContent || '').toLowerCase());
+            boxText.indexOf('рейтинг') !== -1 ||
+            boxText.indexOf('rating') !== -1 ||
+            ((scrollBody.parentElement && scrollBody.parentElement.textContent || '').toLowerCase().indexOf('рейтинг') !== -1);
 
-        const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(
-            item => !item.classList.contains('lampa-fire-sort-option')
-        );
+        const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(function (item) {
+            return !item.classList.contains('lampa-fire-sort-option');
+        });
         if (!items.length) return false;
 
-        const texts = items.map(item => (item.textContent || '').trim().toLowerCase()).filter(Boolean);
+        const texts = items.map(function (item) {
+            return (item.textContent || '').trim().toLowerCase();
+        }).filter(Boolean);
 
-        const yearLikeCount = texts.filter(t => /^\d{
+        const yearLikeCount = texts.filter(function (t) {
+            return /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t);
+        }).length;
+        if (yearLikeCount >= 2) return false;
+
+        const hasRatingRange = texts.some(function (t) {
+            return /^(від|от|from)\s+\d+/.test(t);
+        });
+
+        return Boolean(hasRatingHeader || hasRatingRange);
+    }
+
+    function injectIntoOpenSelectbox(rootNode) {
+        const scope = rootNode && rootNode.querySelectorAll ? rootNode : document;
+
+        const scrollBodies = Array.from(scope.querySelectorAll('.scroll__body')).filter(function (el) {
+            if (!(el instanceof HTMLElement)) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        });
+
+        for (let i = 0; i < scrollBodies.length; i++) {
+            const scrollBody = scrollBodies[i];
+            const existingOpt = scrollBody.querySelector('.lampa-fire-sort-option');
+            const validRating = isRatingScrollBody(scrollBody);
+
+            if (!validRating) {
+                if (existingOpt) existingOpt.remove();
+                continue;
+            }
+
+            if (existingOpt) continue;
+
+            const items = Array.from(scrollBody.querySelectorAll('.selectbox-item')).filter(function (item) {
+                return !item.classList.contains('lampa-fire-sort-option');
+            });
+            if (!items.length) continue;
+
+            const sample = items[items.length - 1];
+            const opt = sample.cloneNode(true);
+            opt.classList.remove('active', 'focus', 'selected');
+            opt.classList.add('lampa-fire-sort-option');
+
+            const titleTarget = opt.querySelector('[class*="title"], span, div') || opt;
+            titleTarget.textContent = '🔥 + 👍 >';
+            opt.style.cursor = 'pointer';
+
+            const onPick = function (e) {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                wantFireSort = true;
+
+                if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
+                    Lampa.Select.close();
+                } else {
+                    const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
+                    if (closeBtn) closeBtn.click();
+                }
+                setTimeout(function () {
+                    sortCardsByFire({ silentWhenEmpty: false });
+                }, 60);
+            };
+
+            opt.addEventListener('click', onPick, true);
+            opt.addEventListener('hover:enter', onPick, true);
+
+            const anyItem = items.find(function (item) {
+                const txt = (item.textContent || '').trim().toLowerCase();
+                return txt === 'будь-який' || txt === 'любой' || txt === 'any';
+            });
+
+            if (anyItem) {
+                anyItem.insertAdjacentElement('afterend', opt);
+            } else {
+                scrollBody.appendChild(opt);
+            }
+        }
+    }
+
+    function bindSearchTriggers() {
+        if (window.__lampaFireSortSearchBound) return;
+        window.__lampaFireSortSearchBound = true;
+
+        const handleSearchClick = function (e) {
+            if (!wantFireSort) return;
+            const target = e.target instanceof HTMLElement ? e.target : null;
+            if (!target) return;
+            const txt = (target.textContent || '').
