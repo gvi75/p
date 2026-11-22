@@ -31,7 +31,7 @@
         if (el.card_data && el.card_data.id) return el.card_data;
         if (window.$) {
             const $el = window.$(el);
-            const d = $el.data('card') || $el.data('item') \vert{}\vert{}$el.data('data');
+            const d = $el.data('card') || $el.data('item') || $el.data('data');
             if (d && d.id) return d;
         }
         return null;
