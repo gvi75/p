@@ -14,7 +14,7 @@
         if (el.card_data && el.card_data.id) return el.card_data;
         if (window.$) {
             const $el = window.$(el);
-            const d = $el.data('card') || $el.data('item') \vert{}\vert{}$el.data('data');
+            const d = $el.data('card') || $el.data('item') || $el.data('data');
             if (d && d.id) return d;
         }
         return null;
@@ -378,4 +378,51 @@
             if (!wantFireSort) return;
             const target = e.target instanceof HTMLElement ? e.target : null;
             if (!target) return;
-            const txt = (target.textContent || '').
+            const txt = (target.textContent || '').trim().toLowerCase();
+            if (
+                txt.indexOf('розпочати пошук') !== -1 ||
+                txt.indexOf('начать поиск') !== -1 ||
+                txt.indexOf('start search') !== -1 ||
+                target.closest('[class*="search"], [class*="submit"], [class*="apply"]')
+            ) {
+                setTimeout(function () { scheduleAutoSortIfNeeded(); }, 400);
+            }
+        };
+
+        document.addEventListener('click', handleSearchClick, true);
+    }
+
+    function init() {
+        injectIntoOpenSelectbox(document);
+        bindSearchTriggers();
+
+        if (!window.__lampaFireSortObserver) {
+            let timer = null;
+            window.__lampaFireSortObserver = new MutationObserver(function (mutations) {
+                if (timer) return;
+                timer = setTimeout(function () {
+                    timer = null;
+                    injectIntoOpenSelectbox(document);
+
+                    if (wantFireSort && !isSorting) {
+                        const hasUnsortedCards = mutations.some(function (m) {
+                            return Array.from(m.addedNodes).some(function (n) {
+                                return n instanceof HTMLElement &&
+                                    (n.matches('.card') || (n.querySelector && n.querySelector('.card')));
+                            });
+                        });
+                        if (hasUnsortedCards) {
+                            scheduleAutoSortIfNeeded();
+                        }
+                    }
+                }, 60);
+            });
+            window.__lampaFireSortObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+    }
+
+    init();
+})();
