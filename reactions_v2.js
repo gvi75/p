@@ -32,7 +32,7 @@
         if (el.card_data && el.card_data.id) return el.card_data;
         if (window.$) {
             const $el = window.$(el);
-            const d = $el.data('card') || $el.data('item') || $el.data('data');
+            const d = $el.data('card') || $el.data('item') \vert{}\vert{}$el.data('data');
             if (d && d.id) return d;
         }
         return null;
@@ -158,6 +158,50 @@
         return false;
     }
 
+    function unlockScrollIfStuck() {
+        try {
+            const targets = [
+                document.documentElement,
+                document.body,
+                document.querySelector('.scroll__body'),
+                document.querySelector('.content'),
+                document.querySelector('.main')
+            ];
+
+            for (let i = 0; i < targets.length; i++) {
+                const el = targets[i];
+                if (!(el instanceof HTMLElement)) continue;
+                if (el.style.overflow === 'hidden') {
+                    el.style.overflow = '';
+                }
+                if (el.style.overflowY === 'hidden') {
+                    el.style.overflowY = '';
+                }
+            }
+
+            const lingeringBox = document.querySelector('.selectbox--open, .selector--open');
+            if (lingeringBox && lingeringBox.parentElement) {
+                const isEmpty = !lingeringBox.querySelector('.selectbox-item, .selector-item');
+                if (isEmpty) lingeringBox.remove();
+            }
+        } catch (_) {}
+    }
+
+    function closeSelectCleanly() {
+        try {
+            if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
+                Lampa.Select.close();
+            }
+        } catch (_) {}
+
+        const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
+        if (closeBtn instanceof HTMLElement) {
+            closeBtn.click();
+        }
+
+        setTimeout(unlockScrollIfStuck, 50);
+    }
+
     function applyCardVisibilityFilters() {
         const cards = Array.from(document.querySelectorAll('.card'));
         if (!cards.length) return;
@@ -191,6 +235,8 @@
                 delete card.dataset.hiddenByPlugin;
             }
         }
+
+        unlockScrollIfStuck();
     }
 
     async function fetchCardTotals(method, id) {
@@ -369,6 +415,7 @@
             }
         } finally {
             isSorting = false;
+            unlockScrollIfStuck();
         }
     }
 
@@ -449,7 +496,7 @@
         }
     }
 
-    function handleCustomDecadeSelect(item, origItems, origOnSelect, origOnBack) {
+    function handleCustomDecadeSelect(item, origItems, origOnSelect) {
         const rangeLabel = String((item && (item.title || item.name)) || '').trim();
         selectedDecade = rangeLabel || null;
 
@@ -474,33 +521,25 @@
         }
 
         if (typeof origOnSelect === 'function') {
-            if (matchedOrig) {
-                const patchedOrig = Object.assign({}, matchedOrig, {
-                    title: rangeLabel,
-                    name: rangeLabel
-                });
-                origOnSelect(patchedOrig);
-            } else {
-                origOnSelect(item);
-            }
+            try {
+                if (matchedOrig) {
+                    origOnSelect(Object.assign({}, matchedOrig, {
+                        title: rangeLabel,
+                        name: rangeLabel
+                    }));
+                } else {
+                    origOnSelect(item);
+                }
+            } catch (_) {}
         }
 
         applyCardVisibilityFilters();
-
-        if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
-            Lampa.Select.close();
-        } else {
-            const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
-            if (closeBtn) closeBtn.click();
-        }
+        closeSelectCleanly();
 
         setTimeout(function () {
             applyYearLabelInFilterUi(rangeLabel);
+            unlockScrollIfStuck();
         }, 60);
-
-        if (typeof origOnBack === 'function') {
-            origOnBack();
-        }
 
         if (window.Lampa && Lampa.Noty) {
             Lampa.Noty.show('Обрано період: ' + rangeLabel);
@@ -530,24 +569,34 @@
 
     function isRatingSelectParams(params) {
         if (!params || !Array.isArray(params.items) || !params.items.length) return false;
+        if (isYearSelectParams(params)) return false;
 
         const title = String(params.title || '').trim().toLowerCase();
-        const hasRatingTitle = title.indexOf('рейтинг') !== -1 || title.indexOf('rating') !== -1;
+        if (
+            title.indexOf('рейтинг') !== -1 ||
+            title.indexOf('рейтінг') !== -1 ||
+            title.indexOf('rating') !== -1
+        ) {
+            return true;
+        }
 
         const itemTitles = params.items.map(function (it) {
             return String((it && (it.title || it.name)) || '').trim().toLowerCase();
         }).filter(Boolean);
 
-        const yearLikeCount = itemTitles.filter(function (t) {
-            return /^\d{4}(\s*[-–]\s*\d{4})?$/.test(t);
-        }).length;
-        if (yearLikeCount >= 2) return false;
-
-        const hasRatingRange = itemTitles.some(function (t) {
-            return /^(від|от|from)\s+\d+/.test(t);
+        const hasAnyOption = itemTitles.some(function (t) {
+            return t === 'будь-який' || t === 'любой' || t === 'any' || t === 'все' || t === 'всі';
         });
 
-        return Boolean(hasRatingTitle || hasRatingRange);
+        const hasRatingPatterns = itemTitles.some(function (t) {
+            return (
+                /^(від|от|from|понад|свыше|over)\s*\d+/.test(t) ||
+                /^\d+(\.\d+)?\s*(\+|>\s*|=|>)/.test(t) ||
+                /^[1-9](\.\d+)?$/.test(t)
+            );
+        });
+
+        return Boolean(hasAnyOption && hasRatingPatterns);
     }
 
     function isFilterLikeSelectParams(params) {
@@ -588,13 +637,7 @@
     function toggleHideWatched() {
         hideWatched = !hideWatched;
         applyCardVisibilityFilters();
-
-        if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
-            Lampa.Select.close();
-        } else {
-            const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
-            if (closeBtn) closeBtn.click();
-        }
+        closeSelectCleanly();
 
         if (window.Lampa && Lampa.Noty) {
             Lampa.Noty.show(
@@ -607,13 +650,7 @@
 
     function triggerLikeSortSelection() {
         wantLikeSort = true;
-
-        if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
-            Lampa.Select.close();
-        } else {
-            const closeBtn = document.querySelector('.selectbox__close, .selector__close, .select__close');
-            if (closeBtn) closeBtn.click();
-        }
+        closeSelectCleanly();
 
         setTimeout(function () {
             sortCardsByLikes({ silent: false });
@@ -635,7 +672,6 @@
                 let modified = false;
                 const isYearMenu = isYearSelectParams(params);
                 const origOnSelect = params.onSelect;
-                const origOnBack = params.onBack;
 
                 if (isYearMenu) {
                     const alreadyDecades = nextItems.some(function (it) {
@@ -653,12 +689,13 @@
                     if (!alreadyHasRating) {
                         const likeOption = {
                             title: '👍 >',
+                            name: '👍 >',
                             __isLikeSortOption: true
                         };
 
                         const anyIndex = nextItems.findIndex(function (it) {
                             const t = String((it && (it.title || it.name)) || '').trim().toLowerCase();
-                            return t === 'будь-який' || t === 'любой' || t === 'any';
+                            return t === 'будь-який' || t === 'любой' || t === 'any' || t === 'все' || t === 'всі';
                         });
 
                         if (anyIndex !== -1) {
@@ -678,6 +715,7 @@
                     if (!alreadyHasHide) {
                         nextItems.push({
                             title: getHideWatchedLabel(),
+                            name: getHideWatchedLabel(),
                             __isHideWatchedOption: true
                         });
                         modified = true;
@@ -689,25 +727,21 @@
                         items: nextItems,
                         onSelect: function (item) {
                             if (isYearMenu && item && item.__isCustomDecadeOption) {
-                                handleCustomDecadeSelect(item, rawItems, origOnSelect, origOnBack);
+                                handleCustomDecadeSelect(item, rawItems, origOnSelect);
                                 return;
                             }
                             if (item && item.__isLikeSortOption) {
                                 triggerLikeSortSelection();
-                                if (typeof origOnBack === 'function') {
-                                    origOnBack();
-                                }
                                 return;
                             }
                             if (item && item.__isHideWatchedOption) {
                                 toggleHideWatched();
-                                if (typeof origOnBack === 'function') {
-                                    origOnBack();
-                                }
                                 return;
                             }
                             if (typeof origOnSelect === 'function') {
-                                return origOnSelect.apply(this, arguments);
+                                const res = origOnSelect.apply(this, arguments);
+                                setTimeout(unlockScrollIfStuck, 80);
+                                return res;
                             }
                         }
                     });
@@ -743,7 +777,10 @@
                 txt.indexOf('start search') !== -1 ||
                 target.closest('[class*="search"], [class*="submit"], [class*="apply"]')
             ) {
-                setTimeout(function () { schedulePosterEnrich({ allowNotify: false }); }, 400);
+                setTimeout(function () {
+                    unlockScrollIfStuck();
+                    schedulePosterEnrich({ allowNotify: false });
+                }, 400);
             }
         };
 
@@ -766,43 +803,4 @@
 
         if (!patchLampaSelect()) {
             let attempts = 0;
-            const waitTimer = setInterval(function () {
-                attempts++;
-                if (patchLampaSelect() || attempts > 50) {
-                    clearInterval(waitTimer);
-                }
-            }, 100);
-        }
-
-        if (!window.__lampaLikeSortObserver) {
-            let timer = null;
-            window.__lampaLikeSortObserver = new MutationObserver(function (mutations) {
-                if (timer) return;
-                timer = setTimeout(function () {
-                    timer = null;
-                    patchLampaSelect();
-                    applyCardVisibilityFilters();
-                    if (selectedDecade) {
-                        applyYearLabelInFilterUi(selectedDecade);
-                    }
-
-                    const hasNewCards = mutations.some(function (m) {
-                        return Array.from(m.addedNodes).some(function (n) {
-                            return n instanceof HTMLElement &&
-                                (n.matches('.card') || (n.querySelector && n.querySelector('.card')));
-                        });
-                    });
-                    if (hasNewCards) {
-                        schedulePosterEnrich({ allowNotify: false });
-                    }
-                }, 80);
-            });
-            window.__lampaLikeSortObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-        }
-    }
-
-    init();
-})();
+            const waitTimer = setInterval(function ()
