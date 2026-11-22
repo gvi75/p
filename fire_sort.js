@@ -58,13 +58,27 @@
         return 0;
     }
 
-    function getCardFireValue(card) {
-        let fire = 0;
-        const m = (card.textContent || '').match(/🔥\s*([\d.]+)\s*(K)?/i);
-        if (m) {
-            fire = parseFloat(m[1]) * (m[2] ? 1000 : 1);
-        }
-        return fire;
+    function getCardFireFromDom(card) {
+        const badge = card.querySelector('.card__reaction-fire, [class*="fire"]');
+        const sourceText = badge ? badge.textContent : '';
+        const m = (sourceText || '').match(/([\d]+(?:[.,]\d+)?)\s*(K)?/i);
+        if (!m) return null;
+
+        const num = parseFloat(m[1].replace(',', '.'));
+        if (Number.isNaN(num)) return null;
+
+        return num * (m[2] ? 1000 : 1);
+    }
+
+    async function runWithConcurrency(items, limit, worker) {
+        const queue = items.slice();
+        const runners = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+            while (queue.length) {
+                const item = queue.shift();
+                await worker(item);
+            }
+        });
+        await Promise.all(runners);
     }
 
     async function sortCardsByFire() {
@@ -81,14 +95,27 @@
 
             if (!visibleCards.length) return;
 
-            for (const card of visibleCards) {
+            await runWithConcurrency(visibleCards, 6, async (card) => {
                 const data = getCardData(card);
-                let fireCount = getCardFireValue(card);
-                if (!fireCount && data && data.id) {
-                    fireCount = await fetchFireCount(getMethod(data), data.id);
+                const key = data && data.id ? `${getMethod(data)}_${data.id}` : null;
+
+                let fireCount = null;
+                if (key && Object.prototype.hasOwnProperty.call(cache, key)) {
+                    fireCount = cache[key];
+                } else {
+                    fireCount = getCardFireFromDom(card);
                 }
-                card.dataset.fireSortCount = String(fireCount);
-            }
+
+                if ((fireCount === null || fireCount === 0) && data && data.id) {
+                    const apiCount = await fetchFireCount(getMethod(data), data.id);
+                    if (fireCount === null || apiCount > 0) {
+                        fireCount = apiCount;
+                    }
+                }
+
+                const normalized = typeof fireCount === 'number' && !Number.isNaN(fireCount) ? fireCount : 0;
+                card.dataset.fireSortCount = String(normalized);
+            });
 
             const groups = new Map();
             for (const card of visibleCards) {
@@ -102,9 +129,10 @@
                 if (cards.length < 2) return;
 
                 cards.sort((a, b) => {
-                    const fa = parseFloat(a.dataset.fireSortCount || '0');
-                    const fb = parseFloat(b.dataset.fireSortCount || '0');
-                    return fb - fa;
+                    const fa = parseFloat(a.dataset.fireSortCount || '0') || 0;
+                    const fb = parseFloat(b.dataset.fireSortCount || '0') || 0;
+                    if (fb !== fa) return fb - fa;
+                    return 0;
                 });
 
                 cards.forEach(card => parent.appendChild(card));
@@ -127,18 +155,19 @@
         );
 
         ratingTitles.forEach(titleEl => {
-            const root = titleEl.closest('[class*="selectbox"]') || titleEl.parentElement && titleEl.parentElement.parentElement;
+            const root = titleEl.closest('[class*="selectbox"]') || (titleEl.parentElement && titleEl.parentElement.parentElement);
             if (!root) return;
 
             const sampleBtn = Array.from(root.querySelectorAll('*')).find(el =>
                 el.children.length === 0 &&
-                ['будь-який', 'любой', 'any'].includes((el.textContent || '').trim().toLowerCase())
+                ['будь-який', 'любой', 'any', 'все', 'всі'].includes((el.textContent || '').trim().toLowerCase())
             );
 
             const btnParent = sampleBtn ? sampleBtn.parentElement : root;
             if (!btnParent || btnParent.querySelector('.lampa-fire-sort-btn')) return;
 
             const btn = sampleBtn ? sampleBtn.cloneNode(true) : document.createElement('div');
+            btn.classList.remove('active', 'focus', 'selected');
             btn.classList.add('lampa-fire-sort-btn');
             btn.textContent = '🔥 >';
             btn.style.cursor = 'pointer';
