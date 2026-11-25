@@ -274,341 +274,106 @@
     }
 
 
-// Loads a complete catalogue before any sorted cards are rendered.
-// The caller owns the progress UI and can cancel by setting job.cancelled = true.
-async function loadReactionCatalog(params, job, onProgress) {
-    const REQUEST_TIMEOUT = 20000;
-    const DAY = 86400000;
-    const sourceName = params && params.source;
-    const provider = window.Lampa && Lampa.Api && Lampa.Api.sources && Lampa.Api.sources[sourceName];
-    const allCards = new Map();
-    let shardsCompleted = 0;
-    let shardsPending = 1;
-    let currentRange = "";
-    let checkedReactions = false;
-
-    function problem(message, cancelled) {
-        const error = new Error(message);
-        error.code = cancelled ? 'REACTIONS_CANCELLED' : 'REACTIONS_CATALOG_ERROR';
-        error.cancelled = !!cancelled;
-        return error;
-    }
-
-    function checkCancelled() {
-        if (job && job.cancelled) throw problem('Сортування скасовано.', true);
-    }
-
-    function report(page, totalPages, currentCards) {
-        checkCancelled();
-        if (typeof onProgress !== 'function') return;
-        let loaded = allCards.size;
-        if (currentCards) currentCards.forEach(function (_, key) {
-            if (!allCards.has(key)) loaded++;
-        });
-        onProgress({phase: 'catalog', loaded: loaded, page: page,
-            totalPages: totalPages, shardsCompleted: shardsCompleted, shardsPending: shardsPending, range: currentRange});
-    }
-
-    function splitUrl(url) {
-        if (typeof url !== 'string' || !url || url.indexOf('#') !== -1) {
-            throw problem('Некоректний запит каталогу. Повторно виберіть фільтри.');
-        }
-        const question = url.indexOf('?');
-        return {path: question < 0 ? url : url.slice(0, question),
-            query: new URLSearchParams(question < 0 ? '' : url.slice(question + 1))};
-    }
-
-    function joinUrl(parts) {
-        const query = parts.query.toString();
-        return parts.path + (query ? '?' + query : '');
-    }
-
-    function cardKey(card, url) {
-        if (!card || typeof card !== 'object' || Array.isArray(card) ||
-            (typeof card.id !== 'number' && typeof card.id !== 'string') ||
-            (typeof card.id === 'string' && !/^\d+$/.test(card.id)) ||
-            !Number.isSafeInteger(Number(card.id)) || Number(card.id) < 1) {
-            throw problem('Каталог повернув картку без коректного ID. Сортування зупинено.');
-        }
-        let method = card.media_type;
-        if (method !== 'movie' && method !== 'tv') {
-            const match = /^discover\/(movie|tv)(?:\?|$)/.exec(url);
-            const category = splitUrl(url).query.get('cat');
-            method = match ? match[1] : (category === 'movie' || category === 'tv') ? category : card.name ? 'tv' : 'movie';
-        }
-        return method + '_' + Number(card.id);
-    }
-
-    function requestPage(url, page) {
-        checkCancelled();
-        return new Promise(function (resolve, reject) {
-            let settled = false;
-            let timeout;
-            let cancellation;
-            // Lampa's TMDB list may advance this local page when its release filter
-            // removes an entire page. Never share this object with an activity.
-            const request = Object.assign({}, params, {url: url, page: page});
-            delete request.filter; // Already included in the normalized URL.
-
-            function finish(error, data) {
-                if (settled) return;
-                settled = true;
-                clearTimeout(timeout);
-                clearInterval(cancellation);
-                if (error) reject(error); else resolve({data: data, requested: page, actual: request.page});
-            }
-
-            timeout = setTimeout(function () {
-                finish(problem('Каталог не відповів за 20 секунд. Спробуйте ще раз.'));
-            }, REQUEST_TIMEOUT);
-            cancellation = setInterval(function () {
-                if (job && job.cancelled) finish(problem('Сортування скасовано.', true));
-            }, 100);
-            try {
-                provider.list(request, function (data) {
-                    if (job && job.cancelled) finish(problem('Сортування скасовано.', true));
-                    else finish(null, data);
-                }, function () {
-                    finish(problem('Не вдалося завантажити всі сторінки каталогу. Спробуйте ще раз.'));
-                });
-            } catch (_) {
-                finish(problem('Помилка завантаження каталогу. Спробуйте ще раз.'));
-            }
-        });
-    }
-
-    function validate(response) {
-        const data = response.data;
-        if (!data || typeof data !== 'object' || data.success === false || data.secuses === false ||
-            !Array.isArray(data.results) || !Number.isSafeInteger(data.page) || data.page < 1 ||
-            !Number.isSafeInteger(data.total_pages) || data.total_pages < 0 ||
-            (data.total_results !== undefined && (!Number.isSafeInteger(data.total_results) || data.total_results < 0))) {
-            throw problem('Каталог повернув некоректну відповідь. Неповне сортування не показано.');
-        }
-        const maxAdvance = sourceName === 'tmdb' ? 5 : 0;
-        if (!Number.isSafeInteger(response.actual) || response.actual < response.requested ||
-            response.actual > response.requested + maxAdvance || data.page !== response.actual ||
-            (data.total_pages > 0 && data.page > data.total_pages) ||
-            (data.total_pages === 0 && (data.page !== 1 || data.results.length || data.total_results > 0)) ||
-            (data.total_results === 0 && data.results.length)) {
-            throw problem('Порушено пагінацію каталогу. Спробуйте повторити сортування.');
-        }
-        return data;
-    }
-
-    function parseDay(value) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return null;
-        const time = Date.parse(value + 'T00:00:00Z');
-        if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== value) return null;
-        return Math.floor(time / DAY);
-    }
-
-    function boundedRange(parts) {
-        const match = /^discover\/(movie|tv)$/.exec(parts.path);
-        if (!match) throw problem('Для великої вибірки TMDB потрібен фільтр року або дат.');
-        const field = match[1] === 'movie' ? 'primary_release_date' : 'first_air_date';
-        const yearField = match[1] === 'movie' ? 'primary_release_year' : 'first_air_date_year';
-        const values = [field + '.gte', field + '.lte', yearField];
-        values.forEach(function (key) {
-            if (parts.query.getAll(key).length > 1) {
-                throw problem('Неоднозначний фільтр дат. Повторно виберіть рік.');
-            }
-        });
-        const lower = parts.query.get(field + '.gte');
-        const upper = parts.query.get(field + '.lte');
-        let start = lower === null ? null : parseDay(lower);
-        let end = upper === null ? null : parseDay(upper);
-        if ((lower !== null && start === null) || (upper !== null && end === null)) {
-            throw problem('Некоректний діапазон дат у фільтрі.');
-        }
-        const year = parts.query.get(yearField);
-        if (year !== null) {
-            if (!/^\d{4}$/.test(year) || Number(year) < 1) throw problem('Некоректний рік у фільтрі.');
-            const yearStart = parseDay(year + '-01-01');
-            const yearEnd = parseDay(year + '-12-31');
-            start = start === null ? yearStart : Math.max(start, yearStart);
-            end = end === null ? yearEnd : Math.min(end, yearEnd);
-        }
-        if (start === null || end === null || start > end) {
-            throw problem('TMDB має понад 500 сторінок. Виберіть рік або повний діапазон дат і повторіть сортування.');
-        }
-        return {field: field, start: start, end: end};
-    }
-
-    function divide(url) {
-        const parts = splitUrl(url);
-        const range = boundedRange(parts);
-        if (range.start === range.end) {
-            throw problem('Навіть за один день TMDB має понад 500 сторінок. Звузьте фільтр жанром або мовою.');
-        }
-        const middle = Math.floor((range.start + range.end) / 2);
-        return [[range.start, middle], [middle + 1, range.end]].map(function (span) {
-            const query = new URLSearchParams(parts.query.toString());
-            query.set(range.field + '.gte', new Date(span[0] * DAY).toISOString().slice(0, 10));
-            query.set(range.field + '.lte', new Date(span[1] * DAY).toISOString().slice(0, 10));
-            return joinUrl({path: parts.path, query: query});
-        });
-    }
-
-    checkCancelled();
-    if ((sourceName !== 'tmdb' && sourceName !== 'cub') || !provider || typeof provider.list !== 'function') {
-        throw problem('Це джерело каталогу не підтримує сортування за лайками.');
-    }
-    const initial = splitUrl(params.url);
-    if (params.filter) Object.keys(params.filter).forEach(function (key) {
-        if (key === 'page') return;
-        const value = String(params.filter[key]);
-        if (initial.query.has(key) && initial.query.get(key) !== value) {
-            throw problem('Суперечливі параметри фільтра. Повторно виберіть фільтри.');
-        }
-        initial.query.set(key, value);
-    });
-    initial.query.delete('page');
-    const pending = [joinUrl(initial)];
-
-    while (pending.length) {
-        checkCancelled();
-        const url = pending.shift();
-        const rangeQuery = splitUrl(url).query;
-        const dateField = url.indexOf('discover/tv') === 0 ? 'first_air_date' : 'primary_release_date';
-        currentRange = [rangeQuery.get(dateField + '.gte'), rangeQuery.get(dateField + '.lte')].filter(Boolean).join(' — ');
-        const currentCards = new Map();
-        const fingerprints = new Set();
-        let nextPage = 1;
-        let totalPages = 1;
-        let divided = false;
-        do {
-            checkCancelled();
-            const response = await requestPage(url, nextPage);
-            checkCancelled();
-            const data = validate(response);
-            if (!checkedReactions && data.results.length && job.checkReactions) {
-                await job.checkReactions(data.results[0]);
-                checkCancelled();
-                checkedReactions = true;
-            }
-            // Split before collecting a page from an overlarge shard, including
-            // the case where its page count grows while it is being loaded.
-            if (sourceName === 'tmdb' && data.total_pages > 500) {
-                pending.unshift.apply(pending, divide(url));
-                shardsPending = pending.length;
-                divided = true;
-                report(data.page, data.total_pages);
-                break;
-            }
-            totalPages = Math.max(totalPages, data.total_pages);
-            const keys = data.results.map(function (card) { return cardKey(card, url); });
-            if (keys.length) {
-                const fingerprint = keys.slice().sort().join('|');
-                if (fingerprints.has(fingerprint)) {
-                    throw problem('Каталог повторив ту саму сторінку. Неповне сортування не показано.');
-                }
-                fingerprints.add(fingerprint);
-            }
-            data.results.forEach(function (card, index) {
-                if (!currentCards.has(keys[index])) currentCards.set(keys[index], card);
-            });
-            report(data.page, data.total_pages, currentCards);
-            nextPage = data.page + 1;
-        } while (nextPage <= totalPages);
-        if (!divided) {
-            currentCards.forEach(function (card, key) {
-                if (!allCards.has(key)) allCards.set(key, card);
-            });
-            shardsCompleted++;
-            shardsPending = pending.length;
-            report(nextPage - 1, totalPages);
-        }
-    }
-    checkCancelled();
-    return Array.from(allCards.values());
-}
-
-    // Only this filter's newly created activity gets a data loader. Lampa still
-    // builds the query, cards, navigation and pagination itself.
     let reactionSortInstalled = false;
-    let armedSort = false;
     let filterMenu = null;
     let ratingMenu = null;
+    let filterSignature = '';
     const LIKE_SORT = '__positiveReactions';
+    const snapshots = new Map();
+    let snapshotNumber = 0;
+
+    function signature(menu) {
+        return JSON.stringify(menu.items.filter(function (item) { return item.items; }).map(function (group) {
+            return group.items.filter(function (item) { return !item[LIKE_SORT] && (item.selected || item.checked); });
+        }));
+    }
+
+    function openLoadedSort() {
+        const L = window.Lampa;
+        const active = L.Activity.active();
+        if (!active || !((active.component === 'category_full' && /^(discover\/(movie|tv)\?|\?cat=)/.test(active.url || '')) || active.component === 'reactions_loaded')) {
+            return L.Noty.show('Спочатку застосуйте фільтри та відкрийте список фільмів або серіалів.');
+        }
+        if (signature(filterMenu) !== filterSignature) {
+            return L.Noty.show('Фільтри змінено. Спочатку натисніть «Розпочати пошук», потім оберіть «👍 >».');
+        }
+        const component = active.activity && active.activity.component;
+        const seen = new Set();
+        const cards = [];
+        function add(card) {
+            if (!card || !card.id) return;
+            const key = getMethod(card) + '_' + card.id;
+            if (!seen.has(key)) { seen.add(key); cards.push(Object.assign({}, card)); }
+        }
+        // Read the component's data, including virtualized and buffered cards.
+        // Never scan other rows or fetch another catalogue page.
+        (component && component.items || []).forEach(function (item) { add(item.data); });
+        (component && component.loaded || []).forEach(function (page) { page.forEach(add); });
+        if (!cards.length) return L.Noty.show('У цьому списку ще немає завантажених карток.');
+        const id = String(++snapshotNumber);
+        snapshots.set(id, cards);
+        while (snapshots.size > 2) snapshots.delete(snapshots.keys().next().value);
+        L.Controller.toggle('content');
+        L.Activity.push({component: 'reactions_loaded', source: active.source, url: active.url,
+            reactions_snapshot: id, page: 1, card_type: true,
+            title: '👍 > · ' + cards.length + ' завантажених карток'});
+    }
 
     function installReactionSort() {
         if (reactionSortInstalled) return true;
         const L = window.Lampa;
-        if (!L || !L.Select || !L.Select.listener || !L.Listener || !L.Maker) return false;
+        if (!L || !L.Select || !L.Select.listener || !L.Component || !L.Maker) return false;
         reactionSortInstalled = true;
-        L.Listener.follow('activity', function (event) {
-            const object = event.object;
-            if (event.type !== 'init' || !object || object.component !== 'category_full' ||
-                !(armedSort || object.reactions_positive)) return;
-            if (!/^(discover\/(movie|tv)\?|\?cat=)/.test(object.url || '')) return;
-            armedSort = false;
-            const component = object.activity && object.activity.component;
-            const loader = component && component.components && component.components.find(function (module) {
-                return typeof module.onCreate === 'function' && typeof module.onNext === 'function' &&
-                    typeof module.onInstance === 'function';
+        L.Component.add('reactions_loaded', function (object) {
+            const Base = L.Component.get('category_full');
+            const component = new Base(object);
+            const loader = component.components.find(function (module) {
+                return module.onCreate && module.onNext && module.onInstance;
             });
-            if (!loader || !component.unuse) {
-                L.Noty.show('Ця версія Lampa не підтримує сортування за лайками. Залишено звичайний порядок.');
-                delete object.reactions_positive;
-                return;
-            }
-            object.reactions_positive = true;
-            object.page = 1;
-            if (object.title.indexOf('👍 >') < 0) object.title += ' · 👍 >';
+            if (!loader) throw new Error('Несумісна версія Lampa');
             component.unuse(loader);
-            attachReactionSort(component, object, loader.onInstance);
+            attachReactionSort(component, object, loader.onInstance, snapshots.get(object.reactions_snapshot));
+            return component;
         });
         L.Select.listener.follow('preshow', function (event) {
             const menu = event.active;
             if (!menu || !Array.isArray(menu.items)) return;
             const search = menu.items.find(function (item) { return item.search === true; });
-            const type = menu.items.find(function (item) {
-                return item.items && item.items.some(function (entry) { return entry.cat === 'movie'; });
-            });
+            const type = menu.items.find(function (item) { return item.items && item.items.some(function (entry) { return entry.cat === 'movie'; }); });
             const rating = menu.items.find(function (item) {
                 return item.items && item.items.some(function (entry) { return entry.start === 8; }) &&
                     item.items.some(function (entry) { return entry.voite === '1-3'; });
             });
-            if (search && type && rating && typeof menu.onSelect === 'function') {
+            if (search && type && rating) {
+                if (filterMenu && menu.items[1] === filterMenu.items[1]) {
+                    // Preserve the opening signature while navigating submenus.
+                } else filterSignature = signature(menu);
                 filterMenu = menu;
                 ratingMenu = rating;
                 if (!rating.items.some(function (entry) { return entry[LIKE_SORT]; })) {
-                    const choice = {title: '👍 >', subtitle: 'Позитивні реакції: від більшого до меншого'};
+                    const choice = {title: '👍 >', subtitle: 'Лише вже завантажені картки цього списку'};
                     choice[LIKE_SORT] = true;
                     rating.items.splice(1, 0, choice);
                 }
+                // Native Search applies changes and establishes the new selection.
                 const original = menu.onSelect;
                 menu.onSelect = function (item) {
-                    const sort = item.search && rating.items.some(function (entry) {
-                        return entry[LIKE_SORT] && entry.selected;
-                    });
-                    armedSort = !!sort;
-                    try { return original.apply(this, arguments); }
-                    finally { armedSort = false; }
+                    if (item.search) filterSignature = signature(menu);
+                    return original.apply(this, arguments);
                 };
             } else if (ratingMenu && menu.items === ratingMenu.items && typeof menu.onSelect === 'function') {
                 const original = menu.onSelect;
                 menu.onSelect = function (item) {
-                    if (!item[LIKE_SORT]) return original.apply(this, arguments);
-                    menu.items.forEach(function (entry) { entry.selected = entry === item; });
-                    const search = filterMenu.items.find(function (entry) { return entry.search; });
-                    filterMenu.onSelect(search);
+                    if (item[LIKE_SORT]) return openLoadedSort();
+                    return original.apply(this, arguments);
                 };
             }
         });
         return true;
     }
 
-    // Keep one completed catalogue in this Lampa session, so Refresh retries
-    // missing reactions instead of downloading thousands of catalogue pages again.
-    let reactionResume = null;
-    let reactionSessionNumber = 0;
-    function attachReactionSort(component, object, onInstance) {
-        if (!object.reactions_session) object.reactions_session = String(Date.now()) + '_' + (++reactionSessionNumber);
-        const resumeKey = object.source + ':' + object.url + ':' + object.reactions_session;
-        if (!reactionResume || reactionResume.key !== resumeKey) reactionResume = {key: resumeKey, cards: null};
-        const resume = reactionResume;
+    function attachReactionSort(component, object, onInstance, cards) {
+        const resume = {cards: cards};
         let job = null;
         let sorted = null;
         let progress = null;
@@ -636,22 +401,11 @@ async function loadReactionCatalog(params, job, onProgress) {
                     progress.textContent = text + ' Натисніть «Назад», щоб скасувати.';
                 }
             }
-            report(resume.cards ? 'Продовження отримання реакцій…' : 'Завантаження всіх результатів фільтра…');
+            report('Реакції для завантажених карток…');
             let done = 0;
             let total = 0;
             try {
-                current.checkReactions = async function (card) {
-                    report('Перевірка доступності реакцій CUB…');
-                    if (!await fetchCardTotals(getMethod(card), card.id, current)) {
-                        throw new Error('CUB не відповідає. Завантаження всього каталогу не розпочато. Спробуйте пізніше.');
-                    }
-                };
-                const cards = resume.cards || await loadReactionCatalog(object, current, function (state) {
-                    report('Каталог: ' + state.loaded + ' карток. ' +
-                        (state.range ? 'Діапазон ' + state.range + '. ' : '') + 'Сторінка ' + state.page + ' / ' + state.totalPages + '.');
-                });
-                if (current.cancelled || job !== current) return;
-                resume.cards = cards;
+                if (!cards) throw new Error('Цей список більше не збережено. Поверніться до фільтра та знову оберіть «👍 >».');
                 total = cards.length;
                 const scored = new Array(cards.length);
                 await runWithConcurrency(cards.map(function (card, index) { return {card: card, index: index}; }), 6,
