@@ -67,7 +67,14 @@
             xhr.timeout = 12000;
             xhr.onload = function () {
                 try {
-                    if (xhr.status < 200 || xhr.status >= 300) throw new Error('HTTP');
+                    if (xhr.status < 200 || xhr.status >= 300) {
+                        const error = new Error('HTTP ' + xhr.status);
+                        error.status = xhr.status;
+                        const header = typeof xhr.getResponseHeader === 'function' && xhr.getResponseHeader('Retry-After');
+                        const seconds = Number(header);
+                        error.retryAfter = header ? (/^\d+$/.test(header) ? seconds * 1000 : Math.max(0, Date.parse(header) - Date.now())) : 0;
+                        throw error;
+                    }
                     const data = JSON.parse(xhr.responseText);
                     if (!data || !Array.isArray(data.result) || data.success === false || data.secuses === false) {
                         throw new Error('Invalid CUB response');
@@ -80,6 +87,17 @@
             };
             xhr.onerror = xhr.ontimeout = xhr.onabort = function () { reject(new Error('CUB unavailable')); };
             xhr.send();
+        });
+    }
+
+    let reactionCooldown = 0;
+    function waitForReactionRetry(job) {
+        return new Promise(function (resolve) {
+            function check() {
+                if ((job && job.cancelled) || Date.now() >= reactionCooldown) return resolve();
+                setTimeout(check, Math.min(200, reactionCooldown - Date.now()));
+            }
+            check();
         });
     }
 
@@ -98,13 +116,21 @@
             reactionQueue.push(async function () {
                 let totals = null;
                 const hosts = ['https://cub.best', 'https://cub.rip'];
-                for (let i = 0; i < hosts.length; i++) {
+                // Two bounded rounds; a shared pause prevents parallel jobs from
+                // immediately hammering the service after a throttling response.
+                for (let attempt = 0; attempt < 2 && !totals; attempt++) {
+                    if (attempt) reactionCooldown = Math.max(reactionCooldown, Date.now() + 1000);
+                    for (let i = 0; i < hosts.length && !totals; i++) {
+                        await waitForReactionRetry(job);
+                        if (job && job.cancelled) break;
+                        try {
+                            totals = await requestReactionJSON(hosts[i] + '/api/reactions/get/' + key);
+                            cache[key] = totals;
+                        } catch (error) {
+                            if (error.status === 429) reactionCooldown = Math.max(reactionCooldown, Date.now() + Math.max(5000, error.retryAfter || 0));
+                        }
+                    }
                     if (job && job.cancelled) break;
-                    try {
-                        totals = await requestReactionJSON(hosts[i] + '/api/reactions/get/' + key);
-                        cache[key] = totals;
-                        break;
-                    } catch (_) {}
                 }
                 delete pendingTotals[key];
                 reactionRequests--;
@@ -183,9 +209,10 @@
 
     async function runWithConcurrency(items, limit, worker) {
         const queue = items.slice();
+        let nextItem = 0;
         const runners = Array.from({ length: Math.min(limit, queue.length) }, async function () {
-            while (queue.length) {
-                const item = queue.shift();
+            while (nextItem < queue.length) {
+                const item = queue[nextItem++];
                 await worker(item);
             }
         });
@@ -257,6 +284,8 @@ async function loadReactionCatalog(params, job, onProgress) {
     const allCards = new Map();
     let shardsCompleted = 0;
     let shardsPending = 1;
+    let currentRange = "";
+    let checkedReactions = false;
 
     function problem(message, cancelled) {
         const error = new Error(message);
@@ -277,7 +306,7 @@ async function loadReactionCatalog(params, job, onProgress) {
             if (!allCards.has(key)) loaded++;
         });
         onProgress({phase: 'catalog', loaded: loaded, page: page,
-            totalPages: totalPages, shardsCompleted: shardsCompleted, shardsPending: shardsPending});
+            totalPages: totalPages, shardsCompleted: shardsCompleted, shardsPending: shardsPending, range: currentRange});
     }
 
     function splitUrl(url) {
@@ -440,6 +469,9 @@ async function loadReactionCatalog(params, job, onProgress) {
     while (pending.length) {
         checkCancelled();
         const url = pending.shift();
+        const rangeQuery = splitUrl(url).query;
+        const dateField = url.indexOf('discover/tv') === 0 ? 'first_air_date' : 'primary_release_date';
+        currentRange = [rangeQuery.get(dateField + '.gte'), rangeQuery.get(dateField + '.lte')].filter(Boolean).join(' — ');
         const currentCards = new Map();
         const fingerprints = new Set();
         let nextPage = 1;
@@ -450,6 +482,11 @@ async function loadReactionCatalog(params, job, onProgress) {
             const response = await requestPage(url, nextPage);
             checkCancelled();
             const data = validate(response);
+            if (!checkedReactions && data.results.length && job.checkReactions) {
+                await job.checkReactions(data.results[0]);
+                checkCancelled();
+                checkedReactions = true;
+            }
             // Split before collecting a page from an overlarge shard, including
             // the case where its page count grows while it is being loaded.
             if (sourceName === 'tmdb' && data.total_pages > 500) {
@@ -563,7 +600,15 @@ async function loadReactionCatalog(params, job, onProgress) {
         return true;
     }
 
+    // Keep one completed catalogue in this Lampa session, so Refresh retries
+    // missing reactions instead of downloading thousands of catalogue pages again.
+    let reactionResume = null;
+    let reactionSessionNumber = 0;
     function attachReactionSort(component, object, onInstance) {
+        if (!object.reactions_session) object.reactions_session = String(Date.now()) + '_' + (++reactionSessionNumber);
+        const resumeKey = object.source + ':' + object.url + ':' + object.reactions_session;
+        if (!reactionResume || reactionResume.key !== resumeKey) reactionResume = {key: resumeKey, cards: null};
+        const resume = reactionResume;
         let job = null;
         let sorted = null;
         let progress = null;
@@ -591,19 +636,30 @@ async function loadReactionCatalog(params, job, onProgress) {
                     progress.textContent = text + ' Натисніть «Назад», щоб скасувати.';
                 }
             }
-            report('Завантаження всіх результатів фільтра…');
+            report(resume.cards ? 'Продовження отримання реакцій…' : 'Завантаження всіх результатів фільтра…');
+            let done = 0;
+            let total = 0;
             try {
-                const cards = await loadReactionCatalog(object, current, function (state) {
-                    report('Каталог: ' + state.loaded + ' карток; сторінка ' + state.page + ' / ' + state.totalPages + '.');
+                current.checkReactions = async function (card) {
+                    report('Перевірка доступності реакцій CUB…');
+                    if (!await fetchCardTotals(getMethod(card), card.id, current)) {
+                        throw new Error('CUB не відповідає. Завантаження всього каталогу не розпочато. Спробуйте пізніше.');
+                    }
+                };
+                const cards = resume.cards || await loadReactionCatalog(object, current, function (state) {
+                    report('Каталог: ' + state.loaded + ' карток. ' +
+                        (state.range ? 'Діапазон ' + state.range + '. ' : '') + 'Сторінка ' + state.page + ' / ' + state.totalPages + '.');
                 });
-                let done = 0;
+                if (current.cancelled || job !== current) return;
+                resume.cards = cards;
+                total = cards.length;
                 const scored = new Array(cards.length);
                 await runWithConcurrency(cards.map(function (card, index) { return {card: card, index: index}; }), 6,
                     async function (entry) {
                         if (current.cancelled) return;
                         const totals = await fetchCardTotals(getMethod(entry.card), entry.card.id, current);
                         if (current.cancelled) return;
-                        if (!totals) throw new Error('Не вдалося отримати всі реакції CUB. Спробуйте повторити сортування.');
+                        if (!totals) throw new Error('CUB не повернув реакції після повторних спроб.');
                         scored[entry.index] = {card: entry.card, likes: totals.likes, index: entry.index};
                         report('Реакції: ' + (++done) + ' / ' + cards.length + '.');
                     });
@@ -617,7 +673,12 @@ async function loadReactionCatalog(params, job, onProgress) {
                 if (current.cancelled || job !== current) return;
                 current.cancelled = true;
                 removeProgress();
-                component.params.empty = {title: 'Сортування не завершено', descr: error.message};
+                const known = resume.cards ? resume.cards.filter(function (card) {
+                    return Object.prototype.hasOwnProperty.call(cache, getMethod(card) + '_' + card.id);
+                }).length : 0;
+                component.params.empty = {title: 'Сортування не завершено', descr: error.message +
+                    (resume.cards ? ' Отримано реакції: ' + known + ' / ' + total +
+                        '. Натисніть «Оновити»: буде використано збережений каталог і отримані реакції. Не перезавантажуйте Lampa.' : '')};
                 component.empty();
             }
         }
