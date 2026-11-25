@@ -580,8 +580,11 @@ async function loadReactionCatalog(params, job, onProgress) {
             const current = job = {cancelled: false};
             removeProgress();
             progress = document.createElement('div');
-            progress.style.cssText = 'padding:2em;font-size:1.2em;line-height:1.6';
-            component.html.appendChild(progress);
+            progress.className = 'reactions-sort-progress';
+            progress.setAttribute('role', 'status');
+            progress.style.cssText = 'width:100%;box-sizing:border-box;flex:0 0 100%;padding:2em;font-size:1.2em;line-height:1.6';
+            // The scroll element fills html's height. Siblings after it are offscreen.
+            component.body.appendChild(progress);
             component.activity.loader(false);
             function report(text) {
                 if (job === current && !current.cancelled && progress) {
