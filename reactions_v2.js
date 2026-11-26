@@ -101,25 +101,45 @@
         return false;
     }
 
-    function resetScrollContainers() {
-        try {
-            const containers = document.querySelectorAll('.scroll, .scroll__body, .content, .main');
-            for (let i = 0; i < containers.length; i++) {
-                const el = containers[i];
-                if (!(el instanceof HTMLElement)) continue;
-                if (el.offsetParent !== null) {
-                    el.scrollTop = 0;
-                }
+    function isCardHidden(card) {
+        return Boolean(card && card.dataset && card.dataset.hiddenByPlugin === '1');
+    }
+
+    function setCardCollapsed(card, hidden) {
+        if (!(card instanceof HTMLElement)) return;
+
+        if (hidden) {
+            if (!card.dataset.origStyle) {
+                card.dataset.origStyle = card.getAttribute('style') || '';
             }
-            window.scrollTo(0, 0);
-        } catch (_) {}
+            card.style.opacity = '0';
+            card.style.width = '0px';
+            card.style.minWidth = '0px';
+            card.style.height = '0px';
+            card.style.minHeight = '0px';
+            card.style.margin = '0px';
+            card.style.padding = '0px';
+            card.style.overflow = 'hidden';
+            card.style.pointerEvents = 'none';
+            card.classList.remove('focus');
+            card.dataset.hiddenByPlugin = '1';
+        } else if (card.dataset.hiddenByPlugin === '1') {
+            if (card.dataset.origStyle !== undefined) {
+                if (card.dataset.origStyle) {
+                    card.setAttribute('style', card.dataset.origStyle);
+                } else {
+                    card.removeAttribute('style');
+                }
+                delete card.dataset.origStyle;
+            }
+            delete card.dataset.hiddenByPlugin;
+        }
     }
 
     function restoreHiddenCards() {
         const hiddenCards = Array.from(document.querySelectorAll('.card[data-hidden-by-plugin="1"]'));
         for (let i = 0; i < hiddenCards.length; i++) {
-            hiddenCards[i].style.display = '';
-            delete hiddenCards[i].dataset.hiddenByPlugin;
+            setCardCollapsed(hiddenCards[i], false);
         }
     }
 
@@ -147,10 +167,10 @@
         const focusedCard = cards.find(function (c) {
             return c.classList.contains('focus') || c.matches(':focus') || c.contains(document.activeElement);
         });
-        if (!focusedCard || focusedCard.style.display !== 'none') return;
+        if (!focusedCard || !isCardHidden(focusedCard)) return;
 
         const nextVisible = cards.find(function (c) {
-            return c !== focusedCard && c.style.display !== 'none' && c.offsetParent !== null;
+            return c !== focusedCard && !isCardHidden(c) && c.offsetParent !== null;
         });
 
         focusedCard.classList.remove('focus');
@@ -166,7 +186,7 @@
         }
     }
 
-    function applyWatchedFilter(shouldResetScroll) {
+    function applyWatchedFilter() {
         if (!hideWatched || isMainScreen()) {
             restoreHiddenCards();
             return;
@@ -182,19 +202,13 @@
             if (!getCardData(card)) continue;
 
             if (isCardWatchedOrLiked(card, idsSet)) {
-                card.style.display = 'none';
-                card.dataset.hiddenByPlugin = '1';
-            } else if (card.dataset.hiddenByPlugin === '1') {
-                card.style.display = '';
-                delete card.dataset.hiddenByPlugin;
+                setCardCollapsed(card, true);
+            } else if (isCardHidden(card)) {
+                setCardCollapsed(card, false);
             }
         }
 
         moveFocusAwayFromHiddenCard(cards);
-
-        if (shouldResetScroll) {
-            setTimeout(resetScrollContainers, 40);
-        }
     }
 
     async function fetchCardTotals(method, id) {
@@ -321,7 +335,7 @@
             const cards = Array.from(document.querySelectorAll('.card'))
                 .filter(function (el) {
                     return getCardData(el) !== null &&
-                        el.dataset.hiddenByPlugin !== '1' &&
+                        !isCardHidden(el) &&
                         !el.querySelector('.lampa-like-dislike-wrap');
                 });
 
@@ -385,7 +399,7 @@
 
     function toggleHideWatched() {
         hideWatched = !hideWatched;
-        applyWatchedFilter(true);
+        applyWatchedFilter();
 
         if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
             Lampa.Select.close();
@@ -479,7 +493,7 @@
                     });
                     if (hasNewCards) {
                         if (hideWatched && !isMainScreen()) {
-                            applyWatchedFilter(false);
+                            applyWatchedFilter();
                         } else if (isMainScreen()) {
                             restoreHiddenCards();
                         }
