@@ -89,6 +89,26 @@
         return ids;
     }
 
+    function isMainScreen() {
+        try {
+            const href = String(window.location.href || '').toLowerCase();
+            if (href.indexOf('component=main') !== -1) return true;
+            if (window.Lampa && Lampa.Activity && typeof Lampa.Activity.active === 'function') {
+                const act = Lampa.Activity.active();
+                if (act && act.component === 'main') return true;
+            }
+        } catch (_) {}
+        return false;
+    }
+
+    function restoreHiddenCards() {
+        const hiddenCards = Array.from(document.querySelectorAll('.card[data-hidden-by-plugin="1"]'));
+        for (let i = 0; i < hiddenCards.length; i++) {
+            hiddenCards[i].style.display = '';
+            delete hiddenCards[i].dataset.hiddenByPlugin;
+        }
+    }
+
     function isCardWatchedOrLiked(card, idsSet) {
         if (!card) return false;
 
@@ -110,22 +130,19 @@
     }
 
     function applyWatchedFilter() {
+        if (!hideWatched || isMainScreen()) {
+            restoreHiddenCards();
+            return;
+        }
+
         const cards = Array.from(document.querySelectorAll('.card'));
         if (!cards.length) return;
 
-        const idsSet = hideWatched ? collectWatchedAndLikedIds() : null;
+        const idsSet = collectWatchedAndLikedIds();
 
         for (let i = 0; i < cards.length; i++) {
             const card = cards[i];
             if (!getCardData(card)) continue;
-
-            if (!hideWatched) {
-                if (card.dataset.hiddenByPlugin === '1') {
-                    card.style.display = '';
-                    delete card.dataset.hiddenByPlugin;
-                }
-                continue;
-            }
 
             if (isCardWatchedOrLiked(card, idsSet)) {
                 card.style.display = 'none';
@@ -258,8 +275,6 @@
     function schedulePosterEnrich() {
         clearTimeout(enrichTimer);
         enrichTimer = setTimeout(function () {
-            applyWatchedFilter();
-
             const cards = Array.from(document.querySelectorAll('.card'))
                 .filter(function (el) {
                     return getCardData(el) !== null &&
@@ -402,6 +417,11 @@
                         });
                     });
                     if (hasNewCards) {
+                        if (hideWatched && !isMainScreen()) {
+                            applyWatchedFilter();
+                        } else if (isMainScreen()) {
+                            restoreHiddenCards();
+                        }
                         schedulePosterEnrich();
                     }
                 }, 200);
