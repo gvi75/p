@@ -105,33 +105,17 @@
         return Boolean(card && card.dataset && card.dataset.hiddenByPlugin === '1');
     }
 
-    function setCardCollapsed(card, hidden) {
+    function setCardHidden(card, hidden) {
         if (!(card instanceof HTMLElement)) return;
 
         if (hidden) {
-            if (!card.dataset.origStyle) {
-                card.dataset.origStyle = card.getAttribute('style') || '';
+            if (card.style.display !== 'none') {
+                card.style.display = 'none';
             }
-            card.style.opacity = '0';
-            card.style.width = '0px';
-            card.style.minWidth = '0px';
-            card.style.height = '0px';
-            card.style.minHeight = '0px';
-            card.style.margin = '0px';
-            card.style.padding = '0px';
-            card.style.overflow = 'hidden';
-            card.style.pointerEvents = 'none';
             card.classList.remove('focus');
             card.dataset.hiddenByPlugin = '1';
         } else if (card.dataset.hiddenByPlugin === '1') {
-            if (card.dataset.origStyle !== undefined) {
-                if (card.dataset.origStyle) {
-                    card.setAttribute('style', card.dataset.origStyle);
-                } else {
-                    card.removeAttribute('style');
-                }
-                delete card.dataset.origStyle;
-            }
+            card.style.display = '';
             delete card.dataset.hiddenByPlugin;
         }
     }
@@ -139,7 +123,7 @@
     function restoreHiddenCards() {
         const hiddenCards = Array.from(document.querySelectorAll('.card[data-hidden-by-plugin="1"]'));
         for (let i = 0; i < hiddenCards.length; i++) {
-            setCardCollapsed(hiddenCards[i], false);
+            setCardHidden(hiddenCards[i], false);
         }
     }
 
@@ -163,27 +147,47 @@
         return false;
     }
 
-    function moveFocusAwayFromHiddenCard(cards) {
-        const focusedCard = cards.find(function (c) {
+    function refreshTvControllerFocus(cards) {
+        const visibleCards = cards.filter(function (c) {
+            return !isCardHidden(c) && c.style.display !== 'none' && c.offsetParent !== null;
+        });
+
+        const currentFocused = cards.find(function (c) {
             return c.classList.contains('focus') || c.matches(':focus') || c.contains(document.activeElement);
         });
-        if (!focusedCard || !isCardHidden(focusedCard)) return;
 
-        const nextVisible = cards.find(function (c) {
-            return c !== focusedCard && !isCardHidden(c) && c.offsetParent !== null;
-        });
+        const targetCard =
+            currentFocused && !isCardHidden(currentFocused) && currentFocused.style.display !== 'none'
+                ? currentFocused
+                : visibleCards[0] || null;
 
-        focusedCard.classList.remove('focus');
+        if (currentFocused && currentFocused !== targetCard) {
+            currentFocused.classList.remove('focus');
+        }
 
-        if (nextVisible) {
-            nextVisible.classList.add('focus');
-            if (typeof nextVisible.focus === 'function') {
-                try { nextVisible.focus({ preventScroll: true }); } catch (_) {}
+        if (targetCard) {
+            cards.forEach(function (c) {
+                if (c !== targetCard) c.classList.remove('focus');
+            });
+            targetCard.classList.add('focus');
+            if (typeof targetCard.focus === 'function') {
+                try { targetCard.focus({ preventScroll: true }); } catch (_) {}
             }
             if (window.$) {
-                try { window.$(nextVisible).trigger('hover:focus'); } catch (_) {}
+                try { window.$(targetCard).trigger('hover:focus'); } catch (_) {}
             }
         }
+
+        try {
+            if (window.Lampa && Lampa.Controller && typeof Lampa.Controller.toggle === 'function') {
+                const act = Lampa.Activity && typeof Lampa.Activity.active === 'function' ? Lampa.Activity.active() : null;
+                if (act && act.activity && typeof act.activity.toggle === 'function') {
+                    act.activity.toggle();
+                } else {
+                    Lampa.Controller.toggle('content');
+                }
+            }
+        } catch (_) {}
     }
 
     function applyWatchedFilter() {
@@ -196,19 +200,26 @@
         if (!cards.length) return;
 
         const idsSet = collectWatchedAndLikedIds();
+        let changed = false;
 
         for (let i = 0; i < cards.length; i++) {
             const card = cards[i];
             if (!getCardData(card)) continue;
 
             if (isCardWatchedOrLiked(card, idsSet)) {
-                setCardCollapsed(card, true);
+                if (!isCardHidden(card)) changed = true;
+                setCardHidden(card, true);
             } else if (isCardHidden(card)) {
-                setCardCollapsed(card, false);
+                changed = true;
+                setCardHidden(card, false);
             }
         }
 
-        moveFocusAwayFromHiddenCard(cards);
+        if (changed) {
+            setTimeout(function () {
+                refreshTvControllerFocus(cards);
+            }, 30);
+        }
     }
 
     async function fetchCardTotals(method, id) {
