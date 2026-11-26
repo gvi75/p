@@ -101,6 +101,20 @@
         return false;
     }
 
+    function resetScrollContainers() {
+        try {
+            const containers = document.querySelectorAll('.scroll, .scroll__body, .content, .main');
+            for (let i = 0; i < containers.length; i++) {
+                const el = containers[i];
+                if (!(el instanceof HTMLElement)) continue;
+                if (el.offsetParent !== null) {
+                    el.scrollTop = 0;
+                }
+            }
+            window.scrollTo(0, 0);
+        } catch (_) {}
+    }
+
     function restoreHiddenCards() {
         const hiddenCards = Array.from(document.querySelectorAll('.card[data-hidden-by-plugin="1"]'));
         for (let i = 0; i < hiddenCards.length; i++) {
@@ -150,18 +164,9 @@
                 try { window.$(nextVisible).trigger('hover:focus'); } catch (_) {}
             }
         }
-
-        try {
-            if (window.Lampa && Lampa.Controller && typeof Lampa.Controller.toggle === 'function') {
-                const act = Lampa.Activity && typeof Lampa.Activity.active === 'function' ? Lampa.Activity.active() : null;
-                if (act && act.activity && typeof act.activity.toggle === 'function') {
-                    act.activity.toggle();
-                }
-            }
-        } catch (_) {}
     }
 
-    function applyWatchedFilter() {
+    function applyWatchedFilter(shouldResetScroll) {
         if (!hideWatched || isMainScreen()) {
             restoreHiddenCards();
             return;
@@ -186,6 +191,10 @@
         }
 
         moveFocusAwayFromHiddenCard(cards);
+
+        if (shouldResetScroll) {
+            setTimeout(resetScrollContainers, 40);
+        }
     }
 
     async function fetchCardTotals(method, id) {
@@ -376,7 +385,7 @@
 
     function toggleHideWatched() {
         hideWatched = !hideWatched;
-        applyWatchedFilter();
+        applyWatchedFilter(true);
 
         if (window.Lampa && Lampa.Select && typeof Lampa.Select.close === 'function') {
             Lampa.Select.close();
@@ -470,7 +479,7 @@
                     });
                     if (hasNewCards) {
                         if (hideWatched && !isMainScreen()) {
-                            applyWatchedFilter();
+                            applyWatchedFilter(false);
                         } else if (isMainScreen()) {
                             restoreHiddenCards();
                         }
