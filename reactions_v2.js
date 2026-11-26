@@ -129,6 +129,38 @@
         return false;
     }
 
+    function moveFocusAwayFromHiddenCard(cards) {
+        const focusedCard = cards.find(function (c) {
+            return c.classList.contains('focus') || c.matches(':focus') || c.contains(document.activeElement);
+        });
+        if (!focusedCard || focusedCard.style.display !== 'none') return;
+
+        const nextVisible = cards.find(function (c) {
+            return c !== focusedCard && c.style.display !== 'none' && c.offsetParent !== null;
+        });
+
+        focusedCard.classList.remove('focus');
+
+        if (nextVisible) {
+            nextVisible.classList.add('focus');
+            if (typeof nextVisible.focus === 'function') {
+                try { nextVisible.focus({ preventScroll: true }); } catch (_) {}
+            }
+            if (window.$) {
+                try { window.$(nextVisible).trigger('hover:focus'); } catch (_) {}
+            }
+        }
+
+        try {
+            if (window.Lampa && Lampa.Controller && typeof Lampa.Controller.toggle === 'function') {
+                const act = Lampa.Activity && typeof Lampa.Activity.active === 'function' ? Lampa.Activity.active() : null;
+                if (act && act.activity && typeof act.activity.toggle === 'function') {
+                    act.activity.toggle();
+                }
+            }
+        } catch (_) {}
+    }
+
     function applyWatchedFilter() {
         if (!hideWatched || isMainScreen()) {
             restoreHiddenCards();
@@ -152,6 +184,8 @@
                 delete card.dataset.hiddenByPlugin;
             }
         }
+
+        moveFocusAwayFromHiddenCard(cards);
     }
 
     async function fetchCardTotals(method, id) {
@@ -288,10 +322,32 @@
         }, 300);
     }
 
+    function isSubFilterTitle(title) {
+        return (
+            title === 'жанр' ||
+            title === 'жанри' ||
+            title === 'жанры' ||
+            title === 'genre' ||
+            title === 'рік' ||
+            title === 'год' ||
+            title === 'year' ||
+            title === 'країна' ||
+            title === 'страна' ||
+            title === 'country' ||
+            title.indexOf('рейтинг') !== -1 ||
+            title.indexOf('rating') !== -1 ||
+            title.indexOf('сортув') !== -1 ||
+            title.indexOf('сортиров') !== -1 ||
+            title.indexOf('sort') !== -1
+        );
+    }
+
     function isFilterMenuParams(params) {
         if (!params || !Array.isArray(params.items) || params.items.length < 2) return false;
 
         const title = String(params.title || '').trim().toLowerCase();
+        if (isSubFilterTitle(title)) return false;
+
         if (
             title.indexOf('фільтр') !== -1 ||
             title.indexOf('фильтр') !== -1 ||
@@ -304,18 +360,14 @@
             return String((it && (it.title || it.name)) || '').trim().toLowerCase();
         });
 
-        return itemTitles.some(function (t) {
-            return (
-                t.indexOf('жанр') !== -1 ||
-                t.indexOf('рік') !== -1 ||
-                t.indexOf('год') !== -1 ||
-                t.indexOf('країна') !== -1 ||
-                t.indexOf('страна') !== -1 ||
-                t.indexOf('рейтинг') !== -1 ||
-                t.indexOf('сортув') !== -1 ||
-                t.indexOf('сортиров') !== -1
-            );
-        });
+        let matchedCriteria = 0;
+        if (itemTitles.some(function (t) { return t.indexOf('жанр') !== -1 || t.indexOf('genre') !== -1; })) matchedCriteria++;
+        if (itemTitles.some(function (t) { return t.indexOf('рік') !== -1 || t.indexOf('год') !== -1 || t.indexOf('year') !== -1; })) matchedCriteria++;
+        if (itemTitles.some(function (t) { return t.indexOf('країна') !== -1 || t.indexOf('страна') !== -1 || t.indexOf('country') !== -1; })) matchedCriteria++;
+        if (itemTitles.some(function (t) { return t.indexOf('рейтинг') !== -1 || t.indexOf('rating') !== -1; })) matchedCriteria++;
+        if (itemTitles.some(function (t) { return t.indexOf('сортув') !== -1 || t.indexOf('сортиров') !== -1 || t.indexOf('sort') !== -1; })) matchedCriteria++;
+
+        return matchedCriteria >= 2;
     }
 
     function getHideWatchedLabel() {
