@@ -109,22 +109,11 @@
         if (!(card instanceof HTMLElement)) return;
 
         if (hidden) {
-            if (card.dataset.origStyle === undefined) {
-                card.dataset.origStyle = card.getAttribute('style') || '';
-            }
-            card.style.position = 'absolute';
-            card.style.left = '-9999px';
-            card.style.visibility = 'hidden';
-            card.style.pointerEvents = 'none';
+            card.style.display = 'none';
             card.classList.remove('focus');
             card.dataset.hiddenByPlugin = '1';
         } else if (card.dataset.hiddenByPlugin === '1') {
-            if (card.dataset.origStyle) {
-                card.setAttribute('style', card.dataset.origStyle);
-            } else {
-                card.removeAttribute('style');
-            }
-            delete card.dataset.origStyle;
+            card.style.display = '';
             delete card.dataset.hiddenByPlugin;
         }
     }
@@ -134,6 +123,18 @@
         for (let i = 0; i < hiddenCards.length; i++) {
             setCardHidden(hiddenCards[i], false);
         }
+    }
+
+    function ensureScrollableContainers() {
+        try {
+            const nodes = document.querySelectorAll('.scroll, .scroll__body, .content, .main');
+            for (let i = 0; i < nodes.length; i++) {
+                const el = nodes[i];
+                if (!(el instanceof HTMLElement)) continue;
+                if (el.style.overflow === 'hidden') el.style.overflow = '';
+                if (el.style.overflowY === 'hidden') el.style.overflowY = '';
+            }
+        } catch (_) {}
     }
 
     function isCardWatchedOrLiked(card, idsSet) {
@@ -182,6 +183,7 @@
     function applyWatchedFilter() {
         if (!hideWatched || isMainScreen()) {
             restoreHiddenCards();
+            ensureScrollableContainers();
             return;
         }
 
@@ -202,6 +204,7 @@
         }
 
         moveFocusAwayFromHiddenCard(cards);
+        ensureScrollableContainers();
     }
 
     async function fetchCardTotals(method, id) {
